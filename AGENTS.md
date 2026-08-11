@@ -64,6 +64,7 @@ Naming follows Cocoa conventions adapted to Swift:
 - Public API requires doc comments (including `- Parameters:` where relevant).
 - Keep the core target free of platform-specific imports (`wayland-client`, X11, etc.).
 - Prefer value semantics (structs) for geometry/state; classes only where identity matters.
+- Ask before assuming: prefer confirming decisions, scope, and intent with the user before making them (e.g. what enters/exits the TODO.md). Do not silently decide for the user.
 
 ## Testing
 

@@ -1,0 +1,5 @@
+module ClibXext [system] {
+    header "shim.h"
+    link "Xext"
+    export *
+}
