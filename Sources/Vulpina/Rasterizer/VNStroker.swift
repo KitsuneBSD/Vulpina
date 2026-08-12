@@ -61,117 +61,195 @@ enum VNStroker {
         let n = points.count
         guard n >= 2 else { return }
 
-        // Compute per-segment unit normals (pointing "left" of the direction).
-        var normals = [VNPoint]()
+        // Per-segment unit left-normals and tangents.
+        var normals  = [VNPoint]()
+        var tangents = [VNPoint]()
         for i in 0..<(n - 1) {
             let dx = points[i+1].x - points[i].x
             let dy = points[i+1].y - points[i].y
             let len = Foundation.sqrt(dx*dx + dy*dy)
-            guard len > 1e-10 else { normals.append(VNPoint.zero); continue }
-            normals.append(VNPoint(x: -dy / len, y: dx / len))  // left normal
+            guard len > 1e-10 else {
+                normals.append(.zero); tangents.append(.zero); continue
+            }
+            let tx = dx / len, ty = dy / len
+            tangents.append(VNPoint(x: tx, y: ty))
+            normals.append(VNPoint(x: -ty, y: tx))   // 90° CCW of tangent = left normal
         }
 
-        // Build left and right offset vertices at each point.
-        // For a joint between segment i-1 and i, compute the miter/round/bevel join.
+        func leftOf(_ p: VNPoint, _ nrm: VNPoint)  -> VNPoint {
+            VNPoint(x: p.x + half * nrm.x, y: p.y + half * nrm.y)
+        }
+        func rightOf(_ p: VNPoint, _ nrm: VNPoint) -> VNPoint {
+            VNPoint(x: p.x - half * nrm.x, y: p.y - half * nrm.y)
+        }
 
+        // Build left and right stroke contours.
         var leftPts  = [VNPoint]()
         var rightPts = [VNPoint]()
 
-        func offsetPoint(base: VNPoint, normal: VNPoint, sign: Double) -> VNPoint {
-            VNPoint(x: base.x + sign * half * normal.x, y: base.y + sign * half * normal.y)
-        }
-
-        // Start cap (or closed join).
+        // Start vertex.
         if closed {
-            let joinL = joinPoint(at: points[0], nIn: normals[n-2], nOut: normals[0],
-                                  half: half, joinStyle: lineJoin, miterLimit: miterLimit,
-                                  side: +1)
-            let joinR = joinPoint(at: points[0], nIn: normals[n-2], nOut: normals[0],
-                                  half: half, joinStyle: lineJoin, miterLimit: miterLimit,
-                                  side: -1)
-            leftPts.append(joinL)
-            rightPts.append(joinR)
+            // The start vertex has the last segment coming in and the first going out.
+            emitJoin(at: points[0],
+                     nIn: normals[n-2], tIn: tangents[n-2],
+                     nOut: normals[0],  tOut: tangents[0],
+                     half: half, joinStyle: lineJoin, miterLimit: miterLimit,
+                     leftPts: &leftPts, rightPts: &rightPts)
         } else {
-            leftPts.append(offsetPoint(base: points[0], normal: normals[0], sign: +1))
-            rightPts.append(offsetPoint(base: points[0], normal: normals[0], sign: -1))
+            leftPts.append(leftOf(points[0], normals[0]))
+            rightPts.append(rightOf(points[0], normals[0]))
         }
 
         // Interior joints.
         for i in 1..<(n - 1) {
-            let jL = joinPoint(at: points[i], nIn: normals[i-1], nOut: normals[i],
-                               half: half, joinStyle: lineJoin, miterLimit: miterLimit, side: +1)
-            let jR = joinPoint(at: points[i], nIn: normals[i-1], nOut: normals[i],
-                               half: half, joinStyle: lineJoin, miterLimit: miterLimit, side: -1)
-            leftPts.append(jL)
-            rightPts.append(jR)
+            emitJoin(at: points[i],
+                     nIn: normals[i-1], tIn: tangents[i-1],
+                     nOut: normals[i],  tOut: tangents[i],
+                     half: half, joinStyle: lineJoin, miterLimit: miterLimit,
+                     leftPts: &leftPts, rightPts: &rightPts)
         }
 
-        // End cap (or closed join).
-        if closed {
-            // closed: endpoint == startpoint, so no extra needed
-        } else {
-            let last = n - 1
-            leftPts.append(offsetPoint(base: points[last], normal: normals[last-1], sign: +1))
-            rightPts.append(offsetPoint(base: points[last], normal: normals[last-1], sign: -1))
+        // End vertex.
+        if !closed {
+            leftPts.append(leftOf(points[n-1], normals[n-2]))
+            rightPts.append(rightOf(points[n-1], normals[n-2]))
         }
 
-        // Assemble the filled outline path.
-        // Forward along left, backward along right, connected by caps at ends.
+        // Assemble the filled outline.
+        // Forward along left, end-cap, backward along right, start-cap.
         result.move(to: leftPts[0])
         for pt in leftPts.dropFirst() { result.line(to: pt) }
 
         if closed {
             result.close()
-            // Inner path reversed so it winds opposite to the outer path.
-            // With non-zero rule: outer (+1) + inner (-1) = 0 at the center (hole).
+            // Inner path reversed → winds opposite (non-zero: outer +1, inner −1 = hole).
             result.move(to: rightPts[rightPts.count - 1])
             for i in stride(from: rightPts.count - 2, through: 0, by: -1) {
                 result.line(to: rightPts[i])
             }
             result.close()
         } else {
-            // End cap
             addCap(center: points[n-1], normal: normals[n-2], half: half,
                    cap: lineCap, atEnd: true, into: &result)
-            // Right side in reverse
             for pt in rightPts.reversed() { result.line(to: pt) }
-            // Start cap
             addCap(center: points[0], normal: normals[0], half: half,
                    cap: lineCap, atEnd: false, into: &result)
             result.close()
         }
     }
 
-    // MARK: - Join helpers
+    // MARK: - Join emission
 
-    private static func joinPoint(
+    /// Appends the correct offset vertices for the join at `vertex`.
+    ///
+    /// The cross product of `tIn × tOut` tells us the turn direction:
+    /// - cross > 0 → left turn: left side is convex, right side is concave.
+    /// - cross < 0 → right turn: right side is convex, left side is concave.
+    ///
+    /// The convex (outer) side may emit 1–N points depending on join style.
+    /// The concave (inner) side emits the single line-intersection point.
+    private static func emitJoin(
         at vertex: VNPoint,
-        nIn: VNPoint, nOut: VNPoint,
+        nIn: VNPoint, tIn: VNPoint,
+        nOut: VNPoint, tOut: VNPoint,
         half: Double,
         joinStyle: VNLineJoin,
         miterLimit: Double,
-        side: Double
-    ) -> VNPoint {
-        let nx = side * (nIn.x + nOut.x)
-        let ny = side * (nIn.y + nOut.y)
-        let len2 = nx * nx + ny * ny
-        guard len2 > 1e-12 else {
-            return VNPoint(x: vertex.x + side * half * nIn.x,
-                           y: vertex.y + side * half * nIn.y)
+        leftPts: inout [VNPoint],
+        rightPts: inout [VNPoint]
+    ) {
+        let cross = tIn.x * tOut.y - tIn.y * tOut.x
+
+        // Offset points at the join vertex from each neighbouring segment.
+        let lIn  = VNPoint(x: vertex.x + half * nIn.x,  y: vertex.y + half * nIn.y)
+        let lOut = VNPoint(x: vertex.x + half * nOut.x, y: vertex.y + half * nOut.y)
+        let rIn  = VNPoint(x: vertex.x - half * nIn.x,  y: vertex.y - half * nIn.y)
+        let rOut = VNPoint(x: vertex.x - half * nOut.x, y: vertex.y - half * nOut.y)
+
+        guard abs(cross) >= 1e-8 else {
+            // Straight segment: use the incoming offset point on each side.
+            leftPts.append(lIn)
+            rightPts.append(rIn)
+            return
         }
-        // Miter: scale so that the join is on the offset edge.
-        // Use abs(dot) because for the right side (side=-1) the join direction is flipped,
-        // making the raw dot negative — the magnitude is what matters.
-        let dot = abs((nx / Foundation.sqrt(len2)) * nIn.x + (ny / Foundation.sqrt(len2)) * nIn.y)
-        let miterScale: Double
-        if joinStyle == .miter && dot > 1e-6 {
-            let ratio = 1.0 / dot
-            miterScale = ratio <= miterLimit ? ratio : 1.0  // fallback to bevel distance
+
+        if cross > 0 {
+            // Left turn → left side convex, right side concave.
+            emitConvexSide(into: &leftPts, vertex: vertex,
+                           pIn: lIn, pOut: lOut, tIn: tIn, tOut: tOut,
+                           half: half, joinStyle: joinStyle, miterLimit: miterLimit)
+            // Concave side: intersection of the two inset offset lines.
+            rightPts.append(lineIntersect(rIn, tIn, rOut, tOut) ?? rIn)
         } else {
-            miterScale = 1.0
+            // Right turn → right side convex, left side concave.
+            leftPts.append(lineIntersect(lIn, tIn, lOut, tOut) ?? lIn)
+            emitConvexSide(into: &rightPts, vertex: vertex,
+                           pIn: rIn, pOut: rOut, tIn: tIn, tOut: tOut,
+                           half: half, joinStyle: joinStyle, miterLimit: miterLimit)
         }
-        let scale = half * miterScale / Foundation.sqrt(len2)
-        return VNPoint(x: vertex.x + nx * scale, y: vertex.y + ny * scale)
+    }
+
+    /// Appends 1 or more points for the convex (outer) side of a join.
+    ///
+    /// - Miter: extends both offset edges to their intersection; falls back to bevel
+    ///   when the miter length exceeds `half × miterLimit`.
+    /// - Bevel: the two endpoint offset points connected by a straight line.
+    /// - Round: an arc from `pIn` to `pOut` around `vertex`.
+    private static func emitConvexSide(
+        into contour: inout [VNPoint],
+        vertex: VNPoint,
+        pIn: VNPoint, pOut: VNPoint,
+        tIn: VNPoint, tOut: VNPoint,
+        half: Double,
+        joinStyle: VNLineJoin,
+        miterLimit: Double
+    ) {
+        switch joinStyle {
+        case .miter:
+            if let miter = lineIntersect(pIn, tIn, pOut, tOut) {
+                let dx = miter.x - vertex.x, dy = miter.y - vertex.y
+                if Foundation.sqrt(dx*dx + dy*dy) <= half * miterLimit {
+                    contour.append(miter)
+                    return
+                }
+            }
+            // Miter limit exceeded → bevel.
+            contour.append(pIn)
+            contour.append(pOut)
+
+        case .bevel:
+            contour.append(pIn)
+            contour.append(pOut)
+
+        case .round:
+            // Arc from pIn to pOut around vertex.
+            // flattenArc emits only the end points of each sub-segment (not the start),
+            // so we must append pIn explicitly before the arc call.
+            let startAngle = Foundation.atan2(pIn.y - vertex.y, pIn.x - vertex.x)
+            let endAngle   = Foundation.atan2(pOut.y - vertex.y, pOut.x - vertex.x)
+            // (pIn−vertex) × (pOut−vertex): negative → CW arc, positive → CCW.
+            let cx = (pIn.x - vertex.x) * (pOut.y - vertex.y)
+                   - (pIn.y - vertex.y) * (pOut.x - vertex.x)
+            contour.append(pIn)
+            VNBezierFlattener.flattenArc(
+                center: vertex, radius: half,
+                startAngle: startAngle, endAngle: endAngle,
+                clockwise: cx < 0,
+                tolerance: 0.1) { contour.append($0) }
+        }
+    }
+
+    // MARK: - Line intersection helper
+
+    /// Intersection of lines (p1 + t·d1) and (p2 + s·d2), or `nil` if parallel.
+    private static func lineIntersect(
+        _ p1: VNPoint, _ d1: VNPoint,
+        _ p2: VNPoint, _ d2: VNPoint
+    ) -> VNPoint? {
+        let denom = d1.x * d2.y - d1.y * d2.x
+        guard abs(denom) > 1e-10 else { return nil }
+        let t = ((p2.x - p1.x) * d2.y - (p2.y - p1.y) * d2.x) / denom
+        return VNPoint(x: p1.x + t * d1.x, y: p1.y + t * d1.y)
     }
 
     // MARK: - Cap helpers
@@ -187,15 +265,12 @@ enum VNStroker {
             break  // no extra geometry; edges already closed
         case .square:
             // Extend by half along the path direction (perpendicular to normal).
-            // Forward tangent = (normal.y, -normal.x); backward = (-normal.y, normal.x).
             let tx =  sign * normal.y * half
             let ty = -sign * normal.x * half
             let lpx = center.x + normal.x * half + tx
             let lpy = center.y + normal.y * half + ty
             let rpx = center.x - normal.x * half + tx
             let rpy = center.y - normal.y * half + ty
-            // For end cap: emit left-extension then right-extension (continuing along left side).
-            // For start cap: emit right-extension then left-extension (connecting from right side).
             if atEnd {
                 result.line(to: VNPoint(x: lpx, y: lpy))
                 result.line(to: VNPoint(x: rpx, y: rpy))
@@ -204,10 +279,8 @@ enum VNStroker {
                 result.line(to: VNPoint(x: lpx, y: lpy))
             }
         case .round:
-            // Semicircle from the current offset point around the endpoint.
             let startA = Foundation.atan2(normal.y, normal.x) * sign
             let endA   = startA + .pi
-            // Emit via arc-to-cubic approximation using the flattener.
             VNBezierFlattener.flattenArc(
                 center: center, radius: half,
                 startAngle: startA, endAngle: endA,

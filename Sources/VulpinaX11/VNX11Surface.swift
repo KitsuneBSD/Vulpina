@@ -71,12 +71,16 @@ public final class VNX11Surface: VNSurface {
                          0, 0, 0, 0,
                          CUnsignedInt(w), CUnsignedInt(h),
                          0 /* no completion event */)
+            // XSync blocks until the server has processed all pending requests,
+            // guaranteeing it has finished reading the SHM segment before we
+            // overwrite it on the next frame (IMM-6).
+            XSync(display, 0)
         } else if let img = putImage {
             XPutImage(display, window, gc, img,
                       0, 0, 0, 0,
                       CUnsignedInt(w), CUnsignedInt(h))
+            XFlush(display)
         }
-        XFlush(display)
     }
 
     // MARK: - Resize
