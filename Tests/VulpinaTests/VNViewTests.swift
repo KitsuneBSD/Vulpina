@@ -5,6 +5,7 @@ import Testing
 
 private final class RecordingSurface: VNSurface {
     var lastFramebuffer: VNFramebuffer?
+    var onNeedsRedraw: (@MainActor () -> Void)? = nil
     @MainActor func present(_ framebuffer: VNFramebuffer) {
         lastFramebuffer = framebuffer
     }

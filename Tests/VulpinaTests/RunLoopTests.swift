@@ -262,6 +262,7 @@ struct VNApplicationTests {
     }
 
     final class MockSurface: VNSurface {
+        var onNeedsRedraw: (@MainActor () -> Void)? = nil
         @MainActor func present(_ framebuffer: VNFramebuffer) {}
     }
 

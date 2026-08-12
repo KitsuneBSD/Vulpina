@@ -115,8 +115,9 @@ public final class VNX11Backend: VNBackend {
     private func handleEvent(_ event: inout XEvent) {
         switch Int32(event.type) {
         case Expose:
-            // M6 will integrate setNeedsDisplay / redraw scheduling.
-            break
+            if event.xexpose.count == 0 {
+                surface?.didExpose()
+            }
 
         case ConfigureNotify:
             let w = Int(event.xconfigure.width)

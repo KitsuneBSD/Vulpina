@@ -28,6 +28,8 @@ public final class VNX11Surface: VNSurface {
     private(set) var widthPixels: Int  = 0
     private(set) var heightPixels: Int = 0
 
+    public var onNeedsRedraw: (@MainActor () -> Void)? = nil
+
     // SHM path (nonisolated(unsafe) for deinit cleanup)
     nonisolated(unsafe) private var shmInfo  = XShmSegmentInfo()
     nonisolated(unsafe) private var shmImage: UnsafeMutablePointer<XImage>? = nil
@@ -90,6 +92,11 @@ public final class VNX11Surface: VNSurface {
         widthPixels  = width
         heightPixels = height
         cleanupBuffers()    // lazily reallocated on next present()
+        onNeedsRedraw?()
+    }
+
+    func didExpose() {
+        onNeedsRedraw?()
     }
 
     // MARK: - Buffer management

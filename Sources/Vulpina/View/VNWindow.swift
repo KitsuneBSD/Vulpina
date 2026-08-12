@@ -65,6 +65,13 @@ public final class VNWindow {
         }
         _displayObserver = observer
         runLoop.addObserver(observer)
+
+        // Ask the surface to notify us when the window needs repainting
+        // (Expose events, resize, etc.) so setNeedsDisplay propagates correctly.
+        surface.onNeedsRedraw = { [weak self] in
+            self?.contentView.setNeedsDisplay()
+        }
+
         // Force an initial draw.
         contentView.setNeedsDisplay()
     }

@@ -7,6 +7,13 @@ public protocol VNSurface: AnyObject {
     ///
     /// - Parameter framebuffer: The composited framebuffer to display.
     @MainActor func present(_ framebuffer: VNFramebuffer)
+
+    /// Called by the owning ``VNWindow`` to register a redraw callback.
+    ///
+    /// The surface must invoke this closure when it detects that the window
+    /// contents are stale (e.g., after an Expose event or a resize). The
+    /// window uses it to call `setNeedsDisplay()` on its content view.
+    @MainActor var onNeedsRedraw: (@MainActor () -> Void)? { get set }
 }
 
 /// A display-server backend (X11, Wayland, …).

@@ -6,6 +6,7 @@ let package = Package(
     products: [
         .library(name: "Vulpina",      targets: ["Vulpina"]),
         .library(name: "VulpinaX11",   targets: ["VulpinaX11"]),
+        .executable(name: "VulpinaDemo", targets: ["VulpinaDemo"]),
     ],
     targets: [
         // Core — backend-agnostic; never imports ClibX11 / ClibXext.
@@ -21,6 +22,12 @@ let package = Package(
         .target(
             name: "VulpinaX11",
             dependencies: ["Vulpina", "ClibX11", "ClibXext"]
+        ),
+
+        // Interactive demo — requires a running X11 display (DISPLAY set).
+        .executableTarget(
+            name: "VulpinaDemo",
+            dependencies: ["Vulpina", "VulpinaX11"]
         ),
 
         // Tests — only test the backend-agnostic core.
