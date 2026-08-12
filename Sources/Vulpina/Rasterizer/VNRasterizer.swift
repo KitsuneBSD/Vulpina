@@ -16,6 +16,7 @@ enum VNRasterizer {
         color: VNColor,
         blendMode: VNBlendMode,
         backingScale: Double,
+        clipBounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)? = nil,
         into framebuffer: inout VNFramebuffer
     ) {
         let W = framebuffer.widthPixels
@@ -30,7 +31,7 @@ enum VNRasterizer {
 
         blit(edges: edges, windingRule: flatPath.windingRule,
              color: color, blendMode: blendMode,
-             W: W, H: H, into: &framebuffer)
+             W: W, H: H, clipBounds: clipBounds, into: &framebuffer)
     }
 
     /// Strokes `path` and fills the resulting outline.
@@ -44,6 +45,7 @@ enum VNRasterizer {
         miterLimit: Double,
         blendMode: VNBlendMode,
         backingScale: Double,
+        clipBounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)? = nil,
         into framebuffer: inout VNFramebuffer
     ) {
         let tolerance = 0.1 / backingScale
@@ -53,7 +55,8 @@ enum VNRasterizer {
             miterLimit: miterLimit,
             flattenTolerance: tolerance)
         fill(path: outline, transform: transform, color: color,
-             blendMode: blendMode, backingScale: backingScale, into: &framebuffer)
+             blendMode: blendMode, backingScale: backingScale,
+             clipBounds: clipBounds, into: &framebuffer)
     }
 
     // MARK: - Internal blit pipeline
@@ -62,6 +65,7 @@ enum VNRasterizer {
         edges: [_VNEdge], windingRule: VNWindingRule,
         color: VNColor, blendMode: VNBlendMode,
         W: Int, H: Int,
+        clipBounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)?,
         into framebuffer: inout VNFramebuffer
     ) {
         var coverage = [Float](repeating: 0, count: W * H)
@@ -74,8 +78,13 @@ enum VNRasterizer {
         let srcB = Float(color.blue)
         let srcA = Float(color.alpha)
 
-        for py in 0..<H {
-            for px in 0..<W {
+        let yBegin = clipBounds.map { max(0, $0.minY) } ?? 0
+        let yEnd   = clipBounds.map { min(H, $0.maxY) } ?? H
+        let xBegin = clipBounds.map { max(0, $0.minX) } ?? 0
+        let xEnd   = clipBounds.map { min(W, $0.maxX) } ?? W
+
+        for py in yBegin..<yEnd {
+            for px in xBegin..<xEnd {
                 let cov = VNAnalyticScanConverter.coverageValue(
                     coverage[py * W + px], rule: windingRule)
                 guard cov > 0 else { continue }

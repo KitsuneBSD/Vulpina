@@ -7,6 +7,7 @@ public final class VNGraphicsContext {
 
     private struct DrawingState {
         var ctm: VNAffineTransform
+        var clipPixelBounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)?
     }
 
     private var stateStack: [DrawingState] = []
@@ -38,7 +39,7 @@ public final class VNGraphicsContext {
     public init(widthPixels: Int, heightPixels: Int, backingScale: Double = 1.0) {
         self.framebuffer = VNFramebuffer(widthPixels: widthPixels, heightPixels: heightPixels)
         self.backingScale = backingScale
-        self.state = DrawingState(ctm: .identity)
+        self.state = DrawingState(ctm: .identity, clipPixelBounds: nil)
     }
 
     // MARK: - State stack
@@ -68,6 +69,27 @@ public final class VNGraphicsContext {
         state.ctm = state.ctm.concatenating(.rotation(angle: angle))
     }
 
+    /// Replaces the current transformation matrix.
+    public func setCTM(_ transform: VNAffineTransform) {
+        state.ctm = transform
+    }
+
+    // MARK: - Clipping
+
+    /// Restricts subsequent drawing to the given pixel-space rectangle.
+    ///
+    /// The clip is saved and restored with ``saveGraphicsState()`` /
+    /// ``restoreGraphicsState()``. Pass `nil` values (or call with no clip) to
+    /// draw to the full framebuffer.
+    public func setClipPixelBounds(minX: Int, minY: Int, maxX: Int, maxY: Int) {
+        state.clipPixelBounds = (minX: minX, minY: minY, maxX: maxX, maxY: maxY)
+    }
+
+    /// Removes the current pixel-space clip, allowing drawing to the full framebuffer.
+    public func resetClip() {
+        state.clipPixelBounds = nil
+    }
+
     // MARK: - Drawing
 
     /// Fills `path` with `color`.
@@ -76,6 +98,7 @@ public final class VNGraphicsContext {
             path: path, transform: state.ctm,
             color: color, blendMode: blendMode,
             backingScale: backingScale,
+            clipBounds: state.clipPixelBounds,
             into: &framebuffer)
     }
 
@@ -95,6 +118,7 @@ public final class VNGraphicsContext {
             lineCap: lineCap, lineJoin: lineJoin,
             miterLimit: miterLimit, blendMode: blendMode,
             backingScale: backingScale,
+            clipBounds: state.clipPixelBounds,
             into: &framebuffer)
     }
 
