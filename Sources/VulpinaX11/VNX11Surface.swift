@@ -29,6 +29,7 @@ public final class VNX11Surface: VNSurface {
     private(set) var heightPixels: Int = 0
 
     public var onNeedsRedraw: (@MainActor () -> Void)? = nil
+    public var onEvent: (@MainActor (VNEvent) -> Void)? = nil
 
     // SHM path (nonisolated(unsafe) for deinit cleanup)
     nonisolated(unsafe) private var shmInfo  = XShmSegmentInfo()

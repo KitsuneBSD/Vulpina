@@ -110,6 +110,12 @@ public final class VNX11Backend: VNBackend {
         return s
     }
 
+    // MARK: - Mouse tracking
+
+    // Track whether button 1 is held so MotionNotify can emit drag vs. move.
+    private var _button1Down = false
+    private var _button3Down = false
+
     // MARK: - Event dispatch
 
     private func handleEvent(_ event: inout XEvent) {
@@ -126,8 +132,64 @@ public final class VNX11Backend: VNBackend {
                 surface?.didResize(width: w, height: h)
             }
 
+        case ButtonPress:
+            let btn = Int32(event.xbutton.button)
+            let loc = windowPoint(x: Int(event.xbutton.x), y: Int(event.xbutton.y))
+            let mods = modifierFlags(state: event.xbutton.state)
+            if btn == 4 {
+                deliver(VNEvent(type: .scrollWheel, locationInWindow: loc,
+                                scrollDeltaX: 0, scrollDeltaY: 3, modifierFlags: mods))
+            } else if btn == 5 {
+                deliver(VNEvent(type: .scrollWheel, locationInWindow: loc,
+                                scrollDeltaX: 0, scrollDeltaY: -3, modifierFlags: mods))
+            } else if btn == 6 {
+                deliver(VNEvent(type: .scrollWheel, locationInWindow: loc,
+                                scrollDeltaX: -3, scrollDeltaY: 0, modifierFlags: mods))
+            } else if btn == 7 {
+                deliver(VNEvent(type: .scrollWheel, locationInWindow: loc,
+                                scrollDeltaX: 3, scrollDeltaY: 0, modifierFlags: mods))
+            } else if btn == 1 {
+                _button1Down = true
+                deliver(VNEvent(type: .mouseDown, locationInWindow: loc, modifierFlags: mods))
+            } else if btn == 3 {
+                _button3Down = true
+                deliver(VNEvent(type: .rightMouseDown, locationInWindow: loc, modifierFlags: mods))
+            }
+
+        case ButtonRelease:
+            let btn = Int32(event.xbutton.button)
+            let loc = windowPoint(x: Int(event.xbutton.x), y: Int(event.xbutton.y))
+            let mods = modifierFlags(state: event.xbutton.state)
+            if btn == 1 {
+                _button1Down = false
+                deliver(VNEvent(type: .mouseUp, locationInWindow: loc, modifierFlags: mods))
+            } else if btn == 3 {
+                _button3Down = false
+                deliver(VNEvent(type: .rightMouseUp, locationInWindow: loc, modifierFlags: mods))
+            }
+
+        case MotionNotify:
+            let loc = windowPoint(x: Int(event.xmotion.x), y: Int(event.xmotion.y))
+            let mods = modifierFlags(state: event.xmotion.state)
+            if _button1Down {
+                deliver(VNEvent(type: .mouseDragged, locationInWindow: loc, modifierFlags: mods))
+            } else if _button3Down {
+                deliver(VNEvent(type: .rightMouseDragged, locationInWindow: loc, modifierFlags: mods))
+            } else {
+                deliver(VNEvent(type: .mouseMoved, locationInWindow: loc, modifierFlags: mods))
+            }
+
+        case KeyPress:
+            let (code, chars, mods) = keyEvent(&event)
+            deliver(VNEvent(type: .keyDown, keyCode: code, characters: chars,
+                            modifierFlags: mods))
+
+        case KeyRelease:
+            let (code, chars, mods) = keyEvent(&event)
+            deliver(VNEvent(type: .keyUp, keyCode: code, characters: chars,
+                            modifierFlags: mods))
+
         case ClientMessage:
-            // WM_DELETE_WINDOW → stop the run loop (terminate the application).
             if event.xclient.data.l.0 == Int(wmDeleteWindow) {
                 runLoop?.stop()
             }
@@ -135,5 +197,47 @@ public final class VNX11Backend: VNBackend {
         default:
             break
         }
+    }
+
+    // MARK: - Translation helpers
+
+    /// Converts X11 pixel coords (top-left, y-down) → window points (bottom-left, y-up).
+    private func windowPoint(x: Int, y: Int) -> VNPoint {
+        let scale = backingScaleFactor
+        let heightPts = Double(surface?.heightPixels ?? 0) / scale
+        return VNPoint(x: Double(x) / scale,
+                       y: heightPts - Double(y) / scale)
+    }
+
+    private func modifierFlags(state: UInt32) -> VNModifierFlags {
+        var flags = VNModifierFlags()
+        if state & UInt32(ShiftMask)   != 0 { flags.insert(.shift) }
+        if state & UInt32(ControlMask) != 0 { flags.insert(.control) }
+        if state & UInt32(Mod1Mask)    != 0 { flags.insert(.option) }
+        if state & UInt32(Mod4Mask)    != 0 { flags.insert(.command) }
+        if state & UInt32(LockMask)    != 0 { flags.insert(.capsLock) }
+        return flags
+    }
+
+    private func keyEvent(_ event: inout XEvent)
+        -> (code: UInt16, characters: String, modifierFlags: VNModifierFlags)
+    {
+        let code = UInt16(event.xkey.keycode)
+        let mods = modifierFlags(state: event.xkey.state)
+        // Look up the printable string for this key.
+        var buf = [CChar](repeating: 0, count: 32)
+        var keySym: KeySym = 0
+        let len = XLookupString(&event.xkey, &buf, Int32(buf.count), &keySym, nil)
+        let chars: String
+        if len > 0 {
+            chars = String(cString: buf)
+        } else {
+            chars = ""
+        }
+        return (code, chars, mods)
+    }
+
+    private func deliver(_ event: VNEvent) {
+        surface?.onEvent?(event)
     }
 }

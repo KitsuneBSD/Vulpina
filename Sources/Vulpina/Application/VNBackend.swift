@@ -14,6 +14,13 @@ public protocol VNSurface: AnyObject {
     /// contents are stale (e.g., after an Expose event or a resize). The
     /// window uses it to call `setNeedsDisplay()` on its content view.
     @MainActor var onNeedsRedraw: (@MainActor () -> Void)? { get set }
+
+    /// Called by the owning ``VNWindow`` to register an event-delivery callback.
+    ///
+    /// The surface invokes this closure for each translated input event (mouse,
+    /// keyboard, scroll) so that ``VNWindow/sendEvent(_:)`` can dispatch it
+    /// through the responder chain.
+    @MainActor var onEvent: (@MainActor (VNEvent) -> Void)? { get set }
 }
 
 /// A display-server backend (X11, Wayland, …).

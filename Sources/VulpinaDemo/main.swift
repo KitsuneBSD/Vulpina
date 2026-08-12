@@ -6,11 +6,12 @@ import VulpinaX11
 private let windowWidth  = 640.0
 private let windowHeight = 480.0
 
-private let headerHeight = 36.0
-private let margin       = 16.0
-private let cardW        = 140.0
-private let cardH        = 90.0
-private let circleSize   = 160.0
+private let headerHeight  = 36.0
+private let margin        = 16.0
+private let cardW         = 140.0
+private let cardH         = 90.0
+private let circleSize    = 160.0
+private let trackerHeight = 120.0
 
 // MARK: - Delegate
 
@@ -71,13 +72,19 @@ final class DemoDelegate: VNApplicationDelegate {
             cardX += cardW + margin
         }
 
-        // Circle cluster (left side below cards)
-        let clusterY = margin
+        // Mouse tracker row at the bottom (D30: interactive demo)
+        let trackerY = margin
+        cv.addSubview(MouseTrackerView(frame: VNRect(x: margin, y: trackerY,
+                                                     width: windowWidth - margin * 2,
+                                                     height: trackerHeight)))
+
+        // Circle cluster above tracker
+        let clusterY = trackerY + trackerHeight + margin
         cv.addSubview(CircleClusterView(frame: VNRect(x: margin, y: clusterY,
                                                       width: circleSize,
                                                       height: circleSize)))
 
-        // Stroke sampler grid (right side)
+        // Stroke sampler grid (right side, same row)
         let samplerX = margin + circleSize + margin
         let samplerW = windowWidth - samplerX - margin
         let samplerH = circleSize

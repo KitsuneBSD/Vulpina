@@ -11,14 +11,14 @@
 
 | Area | Status | Key Gaps |
 |------|--------|----------|
-| **Infra (SwiftPM/Make)** | ✅ Working | `make build`/`release`/`clean`/`test` ✅; Swift 6.3 strict concurrency; **209 testes / 35 suites** ✅ |
+| **Infra (SwiftPM/Make)** | ✅ Working | `make build`/`release`/`clean`/`test` ✅; Swift 6.3 strict concurrency; **241 testes / 41 suites** ✅ |
 | **Ambiente** | ✅ M1 (2026-08-09) | `VNEnvironment` X11-first + `VULPINA_BACKEND` override; 31 testes ✅ |
 | **Geometria** | ✅ M2 (2026-08-11) | `VNPoint`/`VNSize`/`VNRect`/`VNInsets`/`VNColor` — structs `Sendable`, 30 testes ✅ | **Math/GeometryForms (D33) pendente** — `VNShape` + área exata (Green) + `length(at t:)`; `VNPath` migra de `Rasterizer/` |
 | **Rasterizador** | ✅ M3a+M3b+M3c (2026-08-12) | flatten adaptativo 0.1px, ellipse, roundedRect, stroke cap/join, Porter-Duff, even-odd | **Próprio em Swift**, vetorial universal, **AA analítico direto** (D17), scan→cobertura→blitter (D18; **spans por coluna pendente**); Porter-Duff **matriz W3C ✅ 12/12 operadores** (IMM-5 corrigido); **M3c = grupos isolados ✅** + composição glass adiada p/ M12 |
 | **Core backbone** | ✅ M4 (2026-08-11) | `VNRunLoop`/`VNApplication`/`VNBackend` + delegate lifecycle + polling backend; IMM-1 corrigido |
 | **Backend X11** | ✅ M5 (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext`; janela, expose, MIT-SHM blit, polling 60Hz, `backingScaleFactor` via Xft.dpi, WM_DELETE_WINDOW |
-| **Views** | ⚠️ M6 pendente | `VNView` frame/bounds, `isFlipped=false` (bottom-left), `draw(_:)`, display cycle |
-| **Input** | ⚠️ M7 pendente | `VNEvent`/hitTest/responder chain; flip de coordenadas |
+| **Views** | ✅ M6 (2026-08-12) | `VNView` frame/bounds, `isFlipped=false`, `draw(_:)`, display cycle, clip, y-flip |
+| **Input** | ✅ M7 (2026-08-12) | `VNEvent`/`VNResponder`/hitTest/responder chain/`firstResponder`/`sendEvent`; flip de coordenadas; X11 mouse+teclado+scroll |
 | **Texto** | ⚠️ M8 pendente | **Próprio em Swift** (D25), modelo TextKit-like "escrever em folha" (D26); glyphs pelo nosso scan converter; `VNLabel` |
 | **Backend Wayland** | ⚠️ M9 pendente | `VulpinaWayland` + `ClibWayland` (wl_shm) |
 | **Controles/layout** | ⚠️ M10 pendente | `VNButton`, autoresizing frame-based |
@@ -114,7 +114,7 @@
 | M4 | Core backbone | ✅ (2026-08-11) | `VNRunLoop` (modes, sources, timers, observers) + `VNApplication(backend:)` + `VNApplicationDelegate` (D11) + protocolo `VNBackend`/`VNSurface(present:)`; IMM-1 corrigido; polling via `beforeWaiting` (P1 v1); 182 testes ✅ |
 | M5 | Backend X11 | ✅ (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext` (`systemLibrary(pkgConfig:)`); `VNX11Backend` + `VNX11Surface`; janela, expose, blit via MIT-SHM (XPutImage fallback, D27); polling 60Hz (P1); `backingScaleFactor` via Xft.dpi (D9); WM_DELETE_WINDOW (D12); P2 v1: aceitar cópia única, MIT-SHM interno ao backend |
 | M6 | VNView | ✅ (2026-08-12) | `VNView`: `frame`/`bounds`, `isFlipped=false`, `draw(_ context:)` (D13), `setNeedsDisplay` + propagação + z-order (D14); `VNWindow`: display cycle via `beforeWaiting` observer, y-flip no compositor, clip por view em `VNGraphicsContext` ✅; 13 novos testes |
-| M7 | Input | ❌ | `VNEvent` (NSEvent-like), hitTest, responder chain completa + focus/first responder (D28), conversão de coordenadas (flip) |
+| M7 | Input | ✅ (2026-08-12) | `VNEvent` (mouse/key/scroll, `VNModifierFlags`); `VNResponder` (chain, becomeFirstResponder); `VNView` herda `VNResponder` + `hitTest` + `convert(_:from:)`/`convert(_:to:)`; `VNWindow.sendEvent` (hit-test routing, drag tracking, firstResponder); `VNSurface.onEvent` callback; X11 tradução completa (ButtonPress/Release, MotionNotify, KeyPress/Release, scroll buttons 4–7); `MouseTrackerView` no demo (D30); 26 novos testes |
 
 ---
 
@@ -136,7 +136,7 @@
 |------|--------|
 | **Commit do M2–M5** | ✅ commitado (8 commits, topo `27eea01`); IMM-5/IMM-6/M3c commitados em `27eea01` |
 | **Matriz de blend modes** | ✅ fechada em `W3CBlendMatrixTests` (2026-08-11) — 12/12 operadores × fórmula W3C §6/§9.1 com αs ≠ αb, coverage e casos degenerados; reclassificou o IMM-4 como falso positivo |
-| **Demo `VulpinaDemo`** | ❌ D3/D30/ROADMAP-M5 prometem demo interativo desde o M5; target não existe no `Package.swift` — criar como smoke test da pilha completa |
+| **Demo `VulpinaDemo`** | ✅ criado (2026-08-12) — `swift run VulpinaDemo`; header bar, swatches, círculos, stroke sampler, `MouseTrackerView` interativo (crosshair + drag rectangle, D30) |
 | **README desatualizado** | ⚠️ diz "M5 next" (já feito) e "137 testes" (hoje 182); sincronizar com este TODO |
 | `.ai-docs/` | ✅ CHANGELOG/ROADMAP/ARCHITECTURE criados (D32); AUDITS quando houver histórico |
 | Doc comments em 100% do public API (AGENTS.md) | ⚠️ obrigatório; auditar ao fechar cada marco |
