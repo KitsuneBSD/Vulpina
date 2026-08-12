@@ -12,6 +12,15 @@ public final class VNGraphicsContext {
     private var stateStack: [DrawingState] = []
     private var state: DrawingState
 
+    // Layer stack for isolated transparency groups (W3C Compositing-1 §9.2).
+    // Each entry holds the parent framebuffer and the blend mode used to
+    // composite the layer onto it when endTransparencyLayer() is called.
+    private struct LayerEntry {
+        var parentFramebuffer: VNFramebuffer
+        var blendMode: VNBlendMode
+    }
+    private var layerStack: [LayerEntry] = []
+
     // MARK: - Public properties
 
     public private(set) var framebuffer: VNFramebuffer
@@ -91,4 +100,65 @@ public final class VNGraphicsContext {
 
     /// Clears the framebuffer to transparent black.
     public func clear() { framebuffer.clear() }
+
+    // MARK: - Isolated transparency groups (W3C Compositing-1 §9.2)
+
+    /// Begins an isolated transparency group.
+    ///
+    /// All drawing until ``endTransparencyLayer()`` targets a new transparent
+    /// framebuffer (transparent black). On `endTransparencyLayer()` the layer
+    /// is composited onto the parent framebuffer using `blendMode`.
+    ///
+    /// Because the group starts transparent, backdrop-dependent operators
+    /// (`.sourceIn`, `.destinationIn`, `.sourceAtop`, etc.) applied as the
+    /// *first* operation inside the group yield an empty result — matching
+    /// the isolated-group semantics of the W3C spec.
+    ///
+    /// - Parameter blendMode: How the completed layer is composited onto the
+    ///   parent. Defaults to `.sourceOver`.
+    public func beginTransparencyLayer(blendMode: VNBlendMode = .sourceOver) {
+        let layer = VNFramebuffer(widthPixels: framebuffer.widthPixels,
+                                  heightPixels: framebuffer.heightPixels)
+        layerStack.append(LayerEntry(parentFramebuffer: framebuffer, blendMode: blendMode))
+        framebuffer = layer
+    }
+
+    /// Ends the current transparency group and composites it onto the parent.
+    ///
+    /// Each pixel of the completed layer is blended onto the corresponding
+    /// parent pixel using the blend mode passed to ``beginTransparencyLayer(blendMode:)``.
+    /// Both buffers are in premultiplied RGBA8, so `blendPremul` is used directly.
+    public func endTransparencyLayer() {
+        guard let entry = layerStack.last else { return }
+        layerStack.removeLast()
+
+        let layer  = framebuffer
+        var parent = entry.parentFramebuffer
+        let count  = parent.widthPixels * parent.heightPixels
+
+        layer.bytes.withUnsafeBytes { srcBytes in
+            let src = srcBytes.baseAddress!.assumingMemoryBound(to: UInt8.self)
+            for i in 0..<count {
+                let o  = i &* 4
+                let sr = Float(src[o])     / 255
+                let sg = Float(src[o &+ 1]) / 255
+                let sb = Float(src[o &+ 2]) / 255
+                let sa = Float(src[o &+ 3]) / 255
+                let dr = Float(parent.bytes[o])     / 255
+                let dg = Float(parent.bytes[o &+ 1]) / 255
+                let db = Float(parent.bytes[o &+ 2]) / 255
+                let da = Float(parent.bytes[o &+ 3]) / 255
+                let out = VNPorterDuffBlitter.blendPremul(
+                    sr: sr, sg: sg, sb: sb, sa: sa,
+                    dr: dr, dg: dg, db: db, da: da,
+                    mode: entry.blendMode)
+                parent.bytes[o]     = UInt8(min(255, out.r * 255 + 0.5))
+                parent.bytes[o &+ 1] = UInt8(min(255, out.g * 255 + 0.5))
+                parent.bytes[o &+ 2] = UInt8(min(255, out.b * 255 + 0.5))
+                parent.bytes[o &+ 3] = UInt8(min(255, out.a * 255 + 0.5))
+            }
+        }
+
+        framebuffer = parent
+    }
 }

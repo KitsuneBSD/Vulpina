@@ -11,10 +11,10 @@
 
 | Area | Status | Key Gaps |
 |------|--------|----------|
-| **Infra (SwiftPM/Make)** | ✅ Working | `make build`/`release`/`clean`/`test` ✅; Swift 6.3 strict concurrency; 167 testes ✅ |
+| **Infra (SwiftPM/Make)** | ✅ Working | `make build`/`release`/`clean`/`test` ✅; Swift 6.3 strict concurrency; **196 testes / 33 suites** ✅ |
 | **Ambiente** | ✅ M1 (2026-08-09) | `VNEnvironment` X11-first + `VULPINA_BACKEND` override; 31 testes ✅ |
-| **Geometria** | ✅ M2 (2026-08-11) | `VNPoint`/`VNSize`/`VNRect`/`VNInsets`/`VNColor` — structs `Sendable`, 30 testes ✅ |
-| **Rasterizador** | ✅ M3a+M3b (2026-08-11) | flatten adaptativo 0.1px, ellipse, roundedRect, stroke cap/join, Porter-Duff, even-odd | **Próprio em Swift**, vetorial universal, **AA analítico direto** (D17), scan→cobertura→blitter (D18; **spans por coluna pendente**), Porter-Duff completo (D23); M3a scan+analítico → M3b curvas |
+| **Geometria** | ✅ M2 (2026-08-11) | `VNPoint`/`VNSize`/`VNRect`/`VNInsets`/`VNColor` — structs `Sendable`, 30 testes ✅ | **Math/GeometryForms (D33) pendente** — `VNShape` + área exata (Green) + `length(at t:)`; `VNPath` migra de `Rasterizer/` |
+| **Rasterizador** | ⚠️ M3a+M3b ✅; **M3c pendente** | flatten adaptativo 0.1px, ellipse, roundedRect, stroke cap/join, Porter-Duff, even-odd | **Próprio em Swift**, vetorial universal, **AA analítico direto** (D17), scan→cobertura→blitter (D18; **spans por coluna pendente**); Porter-Duff **matriz W3C ✅ 12/12 operadores**; joins do stroker aproximados (IMM-5); **M3c = grupos isolados + base glass** |
 | **Core backbone** | ✅ M4 (2026-08-11) | `VNRunLoop`/`VNApplication`/`VNBackend` + delegate lifecycle + polling backend; IMM-1 corrigido |
 | **Backend X11** | ✅ M5 (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext`; janela, expose, MIT-SHM blit, polling 60Hz, `backingScaleFactor` via Xft.dpi, WM_DELETE_WINDOW |
 | **Views** | ⚠️ M6 pendente | `VNView` frame/bounds, `isFlipped=false` (bottom-left), `draw(_:)`, display cycle |
@@ -62,6 +62,7 @@
 | D30 | Demo | **Interativo mínimo** — mouse move desenha um retângulo; valida input+redraw+blit de uma vez | demo desde M5 exercita a pilha inteira |
 | D31 | Gradientes/sombras | **M11 logo após a fundação** (não sob demanda) — gradientes lineares/radiais + sombras | entra como marco dedicado, não item LOW |
 | D32 | Histórico | **`.ai-docs/` criado agora** — CHANGELOG.md desde o M2; ROADMAP/AUDITS quando houver histórico | histórico começa no M2 |
+| D33 | Math/GeometryForms | **Camada de geometria no core** (pasta, não target separado — D1: sem abstração prematura até existir 2º consumidor, padrão `VNRenderer`): protocolo `VNShape` (`area`/`perimeter`) + `VNCircle`/`VNEllipse`/`VNRect`; **`VNPath` migra de `Rasterizer/` para a camada de geometria**; **área exata via teorema de Green sobre base de Bézier** (forma fechada → πr² exato); **`perimeter`/`length(at t:)` numérico com erro certificado** (comprimento de arco de Bézier não tem forma fechada; elipse = integral elíptica) | testes abandonam shoelace ad hoc; golden-model do P3 ganha referência exata; base para dashing (futuro), animação ao longo de path, métricas de stroke; consumidor inicial: os próprios testes |
 
 > Convensões consolidadas: prefixo `VN`, núcleo backend-agnóstico, value semantics (structs) para geometria/estado, classes só onde identidade importa, Swift 6.3 strict concurrency, UI isolada em `@MainActor`.
 
@@ -73,22 +74,27 @@
 |---|---------|----------|
 | P1 | **D5 — source por fd** | ✅ **Decidida (2026-08-11)**: aceitar polling 60Hz via observer `beforeWaiting` como v1. fd-source (`select`/`poll` em `XConnectionNumber`) entra se latência de input > 16ms for observada em benchmark real. |
 | P2 | **D27 × `VNSurface`** | ✅ **Decidida (2026-08-11)**: aceitar cópia única `VNFramebuffer` → SHM buffer no `present(_:)`. MIT-SHM é interno ao `VNX11Surface` (zero cópia no caminho X11); a cópia do seam (Swift struct by-value) é a única overhead real. Revisar se profiling M5 mostrar bottleneck. |
-| P3 | **Timing do `VNRenderer`** | GPU (Skia/Vulkan) hoje em LOW "pós-M10". Se GPU for intenção real, o protocolo entra **antes** de M5/M6 travarem a API de apresentação; o front do pipeline (paths/flatten/stroke/transform) porta bem, mas scan converter + blitter seriam substituídos por tesselação + shader. |
+| P3 | **Renderer GPU — rota da cobertura (compute-coverage, estilo Vello)** | ✅ **Direção decidida (2026-08-11)**: "manter CPU/GPU" = **uma matemática, dois substratos** — GPU futuro entra via **cobertura, não tesselação** (estilo Vello, não Impeller/Skia). O IR do D18 (scan converter → spans de cobertura) é o **contrato compartilhado**; o scan converter e a cobertura **ficam**, só o blitter/composição muda de substrato. Tesselação fica fora: aproxima a geometria e quebraria a matriz W3C 12/12 e o invariante πr². Em aberto: **timing do protocolo `VNRenderer`** — entrar antes de M5/M6 travarem a API de apresentação? |
 | P4 | **D13/D14 — snapshot recording (modelo `GtkSnapshot` do GTK4)** | A API `draw(_ context:)` fica idêntica, mas o alvo do desenho muda: `VNGraphicsContext` grava numa **render tree por view** (recorder), reexecutada no display pass — em vez de escrever direto no framebuffer. Habilita cache por subárvore (RepaintBoundary-style do Flutter). Refinamento, não reversão; muda a implementação do contexto (D13) e o display pass (D14). **Decidir antes do M6** (janela apertada). |
-| P5 | **D16 — caso bitmap (imagens PNG)** | D16 diz "sem caso bitmap no v1" — imagem É caso bitmap. Suportar PNG/JPEG exige **emenda D33** (caso bitmap para blit de textura) + decoder (stb_image via `ClibSTB` no padrão D7, ou PNG puro em Swift — cultura zero-C). Sem emenda, imagens ficam fora do roadmap. |
+| P5 | **D16 — caso bitmap (imagens PNG)** | D16 diz "sem caso bitmap no v1" — imagem É caso bitmap. Suportar PNG/JPEG exige **emenda D34** (caso bitmap para blit de textura) + decoder (stb_image via `ClibSTB` no padrão D7, ou PNG puro em Swift — cultura zero-C). Sem emenda, imagens ficam fora do roadmap. |
 | P6 | **D25 — descoberta de fontes** | D25 decide o parser próprio (zero C no core) mas **não decide de onde vêm os arquivos**. fontconfig via `ClibFontconfig` (fora do core, preserva D7) vs scanner Swift de diretórios (perde cobertura `/usr/share/fonts` + paths de distro). Decidir antes do M8. |
+| P7 | **Glass — modelo de material (liquid-glass Apple / frosted-glass pop!OS)** | Efeito = captura de backdrop (offscreen) + blur Gaussiano + tint semi-transparente + composição sobre o conteúdo. Modelo W3C: **grupos isolados** (Compositing-1 §9.2) + `backdrop-filter` (CSS Filter Effects L2). Decidir: API `VNVisualEffectView`-style vs. função pura; escopo (janela inteira vs. sub-região com cantos arredondados — depende do clip, D13). **Base de composição em M3c**; blur Gaussiano reutiliza M11. **Decidir antes de M11/M12.** |
+| P8 | **Wide color — Display P3 (simulação em software sobre telas sRGB; não confundir com a decisão P3 do renderer GPU)** | Pesquisa 2026-08-11 (References): a vividez do macOS é **painel Display P3** (primárias DCI-P3 + D65 + gamma sRGB) **+ ColorSync** (pipeline color-managed no sistema inteiro) — sem a pipeline, wide gamut é bug (GLFW issue #2748: tela P3 + app sem `setColorSpace` = escuro/oversaturado). Linux não tem o análogo maduro: Wayland `color-management-v1` mergeado upstream fev/2025 (5 anos de review, staging), wlroots mar/2025, Chromium jul/2025, driver NVIDIA pendente. Decidir: **simular P3 em software sobre telas comuns** — manter D15 como espaço de trabalho default e compor em P3 quando o conteúdo for wide (Double já resolve, D20), então **gamut-map perceptual na apresentação** (compressão de saturação preservando matiz + neutros neutros; **não** clipping — achata a vividez). Ganho em tela sRGB é limitado por definição (simulação, não gamut físico — o ColorSync analog é o `color-management-v1`), mas prepara a pilha para telas wide-gamut/HDR; variantes light/dark da paleta seguem o modelo da HIG. Timing: implementar como recurso opcional **antes do M6** (API de cor ainda não travada) vs. adiar até o primeiro backend expor wide gamut. |
 
 ---
 
 ## 🔴 IMMEDIATE — Correção de Bugs
 
-> **Estado atual: `make test` completa** — 167 testes ✅. Todos os IMMs resolvidos (2026-08-11).
+> **Estado atual: `make test` completa** — **182 testes / 31 suites ✅** (2026-08-11), incluindo a matriz W3C de blend modes (`W3CBlendMatrixTests`: 12/12 operadores × fórmula W3C §6/§9.1 com αs ≠ αb + coverage como alpha + degenerados). IMM-4 reclassificado como falso positivo — verificado contra W3C Compositing-1 §9.1.11 e histórico do git (blitter intocado desde M3a/M3b).
 
 | # | Bug | Estado |
 |---|-----|--------|
 | IMM-1 | **`swift test` pendura** — `applicationDidFinishLaunching` agendado como `VNRunLoopSource` (dispara na primeira iteração); `terminate()` inside delegate agora seta `_isStopped` antes da próxima checagem do `while` | ✅ corrigido |
 | IMM-2 | **`VNPath.flattened()`** — `subpathStart` rastreado; `.close` reseta `current = subpathStart` | ✅ corrigido |
 | IMM-3 | **Cobertura com arestas coincidentes** — comportamento verificado e coberto por 3 testes: nonZero clamp ≤1, opostos cancelam, even-odd dobra back | ✅ verificado |
+| IMM-4 | **`VNPorterDuffBlitter` `.destinationAtop` — FALSO POSITIVO da auditoria de 2026-08-11**: código verificado correto per W3C Compositing-1 §9.1.11 (`Fa = 1−αb; Fb = αs` → `co = αs·Cs·(1−αb) + αb·Cb·αs`); git confirma blitter intocado desde M3a/M3b. Lacuna real: só 7/12 operadores tinham teste e nenhum com fórmula completa (αs ≠ αb) — fechada pela matriz W3C em `W3CBlendMatrixTests` (12/12 operadores + coverage + degenerados) | ✅ verificado |
+| IMM-5 | **Joins do stroker aproximados** (`VNStroker.joinPoint`) — miter-limit excedido cai para ponto na bissetriz a distância `half` (não bevel; sub-preenche); round join emite vértice único na bissetriz (corda inscrita, canto "chato"); bevel emite A→bissetriz→B (sobre-preenche). Contradiz D17 "cobertura exata". Faltam testes de geometria de join | ✅ corrigido (2026-08-12) — `emitJoin` detecta lado convexo/côncavo via cross product; `emitConvexSide` emite miter/bevel/round corretos; `lineIntersect` para o lado côncavo; 6 testes `StrokerJoinTests` |
+| IMM-6 | **Race MIT-SHM single-buffer (X11)** — `XShmPutImage` sem completion event + sem `XSync`; o app pode reescrever o segmento enquanto o servidor lê. `freeSHMBuffer()`/`didResize`/`deinit` fazem detach sem sync. Hardening: completion event ou ring de buffers | ✅ corrigido (2026-08-12) — `XSync(display, 0)` após `XShmPutImage` garante que o servidor terminou de ler antes do próximo frame |
 
 ---
 
@@ -100,7 +106,8 @@
 | M2 | Geometria | ✅ (2026-08-11) | `VNPoint`/`VNSize`/`VNRect`/`VNInsets`/`VNColor` (structs `Sendable`); unidades em points + escala (D9); sRGB `Double` 0…1 (D15); 30 testes ✅ |
 | M3a | Rasterizador — seam + analítico (arestas retas) | ✅ (2026-08-11) | `VNFramebuffer` (RGBA8, stride, **premultiplied** D24, pixels = points × scale); `VNAnalyticScanConverter` (sweep line, y críticos, AET, trapézios, cobertura exata D17) → buffer denso de cobertura → `VNPorterDuffBlitter` (**spans por coluna pendentes**, D18); `VNPath` (move/line/close, `windingRule` D22), `VNAffineTransform`, `VNColor`, `VNBlendMode` (Porter-Duff D23); `VNGraphicsContext` (save/restore, translate/scale/rotate, fill/stroke, blend; **clip pendente** D13); `VNRasterizer`; testes por pixel |
 | M3b | Rasterizador — curvas + primitivas completas | ✅ (2026-08-11) | `VNPath` ganha `addCurve`/`addQuadCurve`/`addArc` com **flatten adaptativo 0.1px** (padrão gg/Go + Skia); rounded rect, ellipse/círculo (D21), stroke com cap/join; cobertura×alpha (D19); testes: área de círculo ≈ πr², erro de flatten < 0.1px, roundRect, stroke |
-| M4 | Core backbone | ✅ (2026-08-11) | `VNRunLoop` (modes, sources, timers, observers) + `VNApplication(backend:)` + `VNApplicationDelegate` (D11) + protocolo `VNBackend`/`VNSurface(present:)`; IMM-1 corrigido; polling via `beforeWaiting` (P1 v1); 167 testes ✅ |
+| M3c | Compositing conforme W3C (matriz + grupos isolados + base glass) | ✅ (2026-08-12) | **Matriz Porter-Duff ✅** — `W3CBlendMatrixTests`: 12 operadores × caso não-trivial αs=0.6 ≠ αb=0.4; **grupos isolados §9.2 ✅** — `beginTransparencyLayer(blendMode:)` + `endTransparencyLayer()` em `VNGraphicsContext`; `blendPremul` em `VNPorterDuffBlitter` para composição premul×premul; 7 testes `TransparencyLayerTests` (empty group, sourceOver, sourceIn/destinationIn em grupo vazio, blend modes de grupo, grupos aninhados, pixel W3C); **composição glass** adiada para M12 (precisa de blur Gaussiano do M11) |
+| M4 | Core backbone | ✅ (2026-08-11) | `VNRunLoop` (modes, sources, timers, observers) + `VNApplication(backend:)` + `VNApplicationDelegate` (D11) + protocolo `VNBackend`/`VNSurface(present:)`; IMM-1 corrigido; polling via `beforeWaiting` (P1 v1); 182 testes ✅ |
 | M5 | Backend X11 | ✅ (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext` (`systemLibrary(pkgConfig:)`); `VNX11Backend` + `VNX11Surface`; janela, expose, blit via MIT-SHM (XPutImage fallback, D27); polling 60Hz (P1); `backingScaleFactor` via Xft.dpi (D9); WM_DELETE_WINDOW (D12); P2 v1: aceitar cópia única, MIT-SHM interno ao backend |
 | M6 | VNView | ❌ | `frame`/`bounds`, `isFlipped=false`, `draw(_ context:)` (D13), `setNeedsDisplay` + coalesce + z-order (D14), display cycle, y-flip no compositor; **clip no `VNGraphicsContext` pendente desde M3a (D13)** |
 | M7 | Input | ❌ | `VNEvent` (NSEvent-like), hitTest, responder chain completa + focus/first responder (D28), conversão de coordenadas (flip) |
@@ -115,6 +122,7 @@
 | M9 | Backend Wayland | ❌ | `VulpinaWayland` + `ClibWayland`; wl_shm buffer + attach/commit; event source |
 | M10 | Controles/layout | ❌ | `VNButton`, autoresizing `NSAutoresizingMask`-style (D29), gerenciamento do frame de `VNWindow` |
 | M11 | Gradientes/sombras | ❌ | gradientes lineares/radiais + sombras (drop shadow) — logo após a fundação (D31) |
+| M12 | Efeito glass | ❌ | material **liquid-glass (Apple) / frosted-glass (pop!OS)**: captura de backdrop + blur Gaussiano + tint semi-transparente + composição sobre o conteúdo (base: composição de M3c + blur de M11); API/escopo decididos em P7 |
 
 ---
 
@@ -122,7 +130,10 @@
 
 | Item | Status |
 |------|--------|
-| **Commit do M2–M5** | ❌ todo o trabalho (Geometry/Rasterizer/RunLoop/Application/VulpinaX11, `.ai-docs/`, testes) está sem commit (repo tem só 3 commits); commitar agora |
+| **Commit do M2–M5** | ✅ commitado (8 commits, topo `27eea01`); IMM-5/IMM-6/M3c commitados em `27eea01` |
+| **Matriz de blend modes** | ✅ fechada em `W3CBlendMatrixTests` (2026-08-11) — 12/12 operadores × fórmula W3C §6/§9.1 com αs ≠ αb, coverage e casos degenerados; reclassificou o IMM-4 como falso positivo |
+| **Demo `VulpinaDemo`** | ❌ D3/D30/ROADMAP-M5 prometem demo interativo desde o M5; target não existe no `Package.swift` — criar como smoke test da pilha completa |
+| **README desatualizado** | ⚠️ diz "M5 next" (já feito) e "137 testes" (hoje 182); sincronizar com este TODO |
 | `.ai-docs/` | ✅ CHANGELOG/ROADMAP/ARCHITECTURE criados (D32); AUDITS quando houver histórico |
 | Doc comments em 100% do public API (AGENTS.md) | ⚠️ obrigatório; auditar ao fechar cada marco |
 
@@ -132,12 +143,14 @@
 
 | Item | Notas |
 |------|-------|
-| Renderer GPU (Skia/Vulkan) | via protocolo `VNRenderer`, pós-M10 |
+| Renderer GPU (compute-coverage estilo Vello) | via protocolo `VNRenderer`, pós-M10 (direção decidida em P3): compartilha o IR do D18 (scan → cobertura), só o blitter muda |
 | Fixed-point (24.8/16.16) | otimização do scan converter, **gated por benchmark** (D20) |
 | Rasterizador — alocações | buffer de cobertura `[Float]` W×H alocado por draw op; `VNFramebuffer.clear()` realoca o array; reuso de buffers quando M6 trouxer muitas views |
 | `VulpinaDemo` completo | demo **interativo** desde M5: mouse move desenha retângulo (D30); evoluir para kit completo |
 | Benchmark do rasterizador | throughput de preenchimento/alpha em largura real |
+| Math/GeometryForms (D33) | camada de geometria: protocolo `VNShape` (`area`/`perimeter`), área exata via Green + `length(at t:)` com erro certificado; `VNPath` migra de `Rasterizer/`; consumidor inicial: testes (fim do shoelace ad hoc) |
 | Suporte de temas/cores | futuro |
+| Wide color — simulação Display P3 em software | telas comuns são sRGB e sem pipeline color-managed: compor com working space de primárias DCI-P3 (gamma sRGB) e **gamut-map perceptual na apresentação** (compressão preservando matiz, neutros neutros, sem clipping); reutiliza o `Double` do D20 e prepara para `color-management-v1` (Wayland, staging) — decisão P8 |
 
 ---
 
@@ -153,6 +166,9 @@
 
 - `AGENTS.md` — regras de codificação e estilo
 - `README.md` — visão geral do projeto
-- Rasterizer specs: Skia CPU backend + Analytic AA (`SkScan_AAAPath`), FreeType `smooth` (FT_Raster), stb_truetype signed-area, cairo fixed-point (24.8)
+- Rasterizer specs: Skia CPU backend + Analytic AA (`SkScan_AAAPath`), FreeType `smooth` (FT_Raster), stb_truetype signed-area, cairo fixed-point (24.8); GPU compute-coverage: Vello (linebender, wgpu) — prova que a cobertura analítica porta para GPU sem tesselação
+- Composição (W3C): Compositing and Blending Level 1 — operadores Porter-Duff §9.1 (fatores Fa/Fb por operador), grupos isolados/knockout §9.2; `backdrop-filter` (CSS Filter Effects Module Level 2)
+- Wide color (Apple/macOS): Display P3 = primárias DCI-P3 (ICC registry v1.0 2022: R 0.68/0.32, G 0.265/0.69, B 0.15/0.06) + D65 + gamma sRGB (`NSColorSpace.displayP3`); painéis P3 desde iMac 5K (2015); **ColorSync** = gerenciamento de cor no sistema inteiro (GLFW issue #2748: sem `setColorSpace`, app em tela P3 fica escuro/oversaturado); paleta de sistema com variantes light/dark tunadas por modo (HIG Color, atualizado jun/2025 — Apple **não** publica hex oficial, valores são medições da comunidade); vibrancy = `NSVisualEffectView` = blur + tint + boost `colorSaturate` (filters do `CABackdropLayer`); Liquid Glass (macOS 26/Tahoe) = lensing/refração
+- Wide color (Linux): Wayland `color-management-v1` = análogo do ColorSync — mergeado upstream fev/2025 (5 anos, 800+ comments; staging), wlroots mar/2025, Chromium jul/2025 (testado no KDE Plasma 6.4.2), driver NVIDIA pendente; dark/light = `org.freedesktop.appearance.color-scheme` via xdg-desktop-portal (não nome de tema GTK — armadilha do Qt6)
 - Texto (Apple/TextKit): `NSTextStorage`/`NSLayoutManager`/`NSTextContainer` — modelo de escrita em folha (D26); parser TTF/OTF próprio (cmap/glyf/hmtx)
 - `.ai-docs/` — CHANGELOG/ROADMAP/ARCHITECTURE criados (D32, desde o M2)
