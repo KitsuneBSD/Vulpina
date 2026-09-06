@@ -15,6 +15,9 @@ public protocol VNSurface: AnyObject {
     /// window uses it to call `setNeedsDisplay()` on its content view.
     @MainActor var onNeedsRedraw: (@MainActor () -> Void)? { get set }
 
+    /// Called with the new logical size after a backend resize.
+    @MainActor var onResize: (@MainActor (VNSize) -> Void)? { get set }
+
     /// Called by the owning ``VNWindow`` to register an event-delivery callback.
     ///
     /// The surface invokes this closure for each translated input event (mouse,
@@ -51,4 +54,14 @@ public protocol VNBackend: AnyObject {
     /// Polls or dispatches pending display-server events. Called once per run-loop
     /// iteration (after the event source fires).
     @MainActor func pollEvents()
+}
+
+public extension VNBackend {
+    /// Creates the run-loop wait driver for this backend.
+    ///
+    /// Backends that expose a native event descriptor should override this.
+    /// The default keeps simple and test backends portable.
+    @MainActor func makeRunLoopDriver() -> any VNRunLoopDriver {
+        VNSleepRunLoopDriver()
+    }
 }

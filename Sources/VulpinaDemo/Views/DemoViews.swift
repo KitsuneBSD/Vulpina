@@ -166,8 +166,8 @@ final class MouseTrackerView: VNView {
         // Draw drag rectangle if in progress
         if let s = dragStart, let e = dragEnd ?? cursorPos {
             let r = VNRect(
-                x: min(s.x, e.x) - bounds.minX,
-                y: min(s.y, e.y) - bounds.minY,
+                x: min(s.x, e.x),
+                y: min(s.y, e.y),
                 width: abs(e.x - s.x),
                 height: abs(e.y - s.y))
             context.fill(VNPath.roundedRect(r, cornerRadius: 4),
@@ -179,42 +179,41 @@ final class MouseTrackerView: VNView {
 
         // Cursor crosshair + dot
         if let p = cursorPos {
-            let lx = p.x - bounds.minX
-            let ly = p.y - bounds.minY
-
             // Horizontal line
-            var h = VNPath(); h.move(to: VNPoint(x: 0, y: ly)); h.line(to: VNPoint(x: bounds.width, y: ly))
+            var h = VNPath(); h.move(to: VNPoint(x: 0, y: p.y)); h.line(to: VNPoint(x: bounds.width, y: p.y))
             context.stroke(h, color: VNColor(red: 1, green: 1, blue: 1, alpha: 0.35), lineWidth: 1)
 
             // Vertical line
-            var v = VNPath(); v.move(to: VNPoint(x: lx, y: 0)); v.line(to: VNPoint(x: lx, y: bounds.height))
+            var v = VNPath(); v.move(to: VNPoint(x: p.x, y: 0)); v.line(to: VNPoint(x: p.x, y: bounds.height))
             context.stroke(v, color: VNColor(red: 1, green: 1, blue: 1, alpha: 0.35), lineWidth: 1)
 
             // Accent dot at cursor
-            let dot = VNPath.ellipse(in: VNRect(x: lx - 5, y: ly - 5, width: 10, height: 10))
+            let dot = VNPath.ellipse(in: VNRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10))
             context.fill(dot, color: VNColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1))
             context.stroke(dot, color: VNColor(red: 1, green: 1, blue: 1, alpha: 0.8), lineWidth: 1)
         }
     }
 
     override func mouseMoved(with event: VNEvent) {
-        cursorPos = event.locationInWindow
+        cursorPos = convert(event.locationInWindow, from: nil)
         setNeedsDisplay()
     }
     override func mouseDown(with event: VNEvent) {
-        dragStart = event.locationInWindow
+        dragStart = convert(event.locationInWindow, from: nil)
         dragEnd   = nil
-        cursorPos = event.locationInWindow
+        cursorPos = dragStart
         setNeedsDisplay()
     }
     override func mouseDragged(with event: VNEvent) {
-        dragEnd   = event.locationInWindow
-        cursorPos = event.locationInWindow
+        let local = convert(event.locationInWindow, from: nil)
+        dragEnd   = local
+        cursorPos = local
         setNeedsDisplay()
     }
     override func mouseUp(with event: VNEvent) {
-        dragEnd   = event.locationInWindow
-        cursorPos = event.locationInWindow
+        let local = convert(event.locationInWindow, from: nil)
+        dragEnd   = local
+        cursorPos = local
         setNeedsDisplay()
     }
 }

@@ -116,8 +116,7 @@ struct VNRunLoopTimerTests {
         loop.runOnce()   // fires and invalidates
         loop.runOnce()   // should prune it from the list
         // No crash = pass; verify it no longer fires.
-        var extra = false
-        let t2 = VNRunLoopTimer(interval: 0.0, repeats: false) { _ in extra = false }
+        let t2 = VNRunLoopTimer(interval: 0.0, repeats: false) { _ in }
         _ = t2  // suppress warning
         #expect(!t.isValid)
     }
@@ -198,6 +197,22 @@ struct VNRunLoopObserverTests {
 
 @Suite("VNRunLoop lifecycle")
 struct VNRunLoopLifecycleTests {
+    @MainActor
+    final class RecordingDriver: VNRunLoopDriver {
+        var waitCount = 0
+        func wait(timeout: TimeInterval?) { waitCount += 1 }
+        func wake() {}
+    }
+
+    @Test @MainActor func injectedDriverReceivesWait() {
+        let loop = VNRunLoop.main
+        let driver = RecordingDriver()
+        loop.setDriver(driver)
+        loop.runOnce()
+        loop.setDriver(VNSleepRunLoopDriver())
+        #expect(driver.waitCount == 1)
+    }
+
     @Test @MainActor func stopExitsRunLoop() {
         let loop = VNRunLoop.main
         var iterations = 0
@@ -263,6 +278,7 @@ struct VNApplicationTests {
 
     final class MockSurface: VNSurface {
         var onNeedsRedraw: (@MainActor () -> Void)? = nil
+        var onResize: (@MainActor (VNSize) -> Void)? = nil
         var onEvent: (@MainActor (VNEvent) -> Void)? = nil
         @MainActor func present(_ framebuffer: VNFramebuffer) {}
     }

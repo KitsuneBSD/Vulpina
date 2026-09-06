@@ -7,6 +7,7 @@ import Foundation
 private final class CaptureSurface: VNSurface {
     var lastFramebuffer: VNFramebuffer?
     var onNeedsRedraw: (@MainActor () -> Void)? = nil
+    var onResize: (@MainActor (VNSize) -> Void)? = nil
     var onEvent: (@MainActor (VNEvent) -> Void)? = nil
     @MainActor func present(_ fb: VNFramebuffer) { lastFramebuffer = fb }
 }

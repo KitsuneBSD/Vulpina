@@ -16,9 +16,8 @@
 /// ```
 ///
 /// `VNApplication` owns the ``VNRunLoop/main`` singleton. It installs a
-/// `.beforeWaiting` observer that polls the backend for events each iteration,
-/// ensuring the event-source pattern works even on backends that use an
-/// in-process signal rather than a file descriptor.
+/// a backend-provided ``VNRunLoopDriver`` and polls translated events after the
+/// driver wakes.
 @MainActor
 public final class VNApplication {
     /// The backend that drives windowing and event delivery.
@@ -45,9 +44,11 @@ public final class VNApplication {
     public func run() {
         // Let the backend register its event source (e.g. X11 connection fd).
         backend.registerEventSource(with: runLoop)
+        runLoop.setDriver(backend.makeRunLoopDriver())
 
-        // Poll backend events on every iteration before the run loop sleeps.
-        let pollObserver = VNRunLoopObserver(activities: .beforeWaiting) { [weak self] _ in
+        // The driver wakes for display-server activity; translate all pending
+        // events immediately after waking.
+        let pollObserver = VNRunLoopObserver(activities: .afterWaiting) { [weak self] _ in
             self?.backend.pollEvents()
         }
         runLoop.addObserver(pollObserver)

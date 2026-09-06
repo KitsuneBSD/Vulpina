@@ -24,11 +24,13 @@ public final class VNX11Surface: VNSurface {
 
     private let visual: UnsafeMutablePointer<Visual>?
     private let depth: Int32
+    private let backingScale: Double
 
     private(set) var widthPixels: Int  = 0
     private(set) var heightPixels: Int = 0
 
     public var onNeedsRedraw: (@MainActor () -> Void)? = nil
+    public var onResize: (@MainActor (VNSize) -> Void)? = nil
     public var onEvent: (@MainActor (VNEvent) -> Void)? = nil
 
     // SHM path (nonisolated(unsafe) for deinit cleanup)
@@ -43,12 +45,13 @@ public final class VNX11Surface: VNSurface {
 
     init(display: OpaquePointer, window: Window,
          visual: UnsafeMutablePointer<Visual>?, screen: Int32, depth: Int32,
-         hasSHM: Bool) {
+         hasSHM: Bool, backingScale: Double) {
         self.display  = display
         self.window   = window
         self.visual   = visual
         self.depth    = depth
         self.hasSHM   = hasSHM
+        self.backingScale = backingScale
         var gcValues = XGCValues()
         self.gc = XCreateGC(display, window, 0, &gcValues)
     }
@@ -93,6 +96,8 @@ public final class VNX11Surface: VNSurface {
         widthPixels  = width
         heightPixels = height
         cleanupBuffers()    // lazily reallocated on next present()
+        onResize?(VNSize(width: Double(width) / backingScale,
+                         height: Double(height) / backingScale))
         onNeedsRedraw?()
     }
 
@@ -192,11 +197,15 @@ public final class VNX11Surface: VNSurface {
             vulpina_ximage_clear_data(img)
             _ = vulpina_XDestroyImage(img)
             if let addr = shmInfo.shmaddr { _ = shmdt(addr) }
+            shmImage = nil
+            shmInfo = XShmSegmentInfo()
         } else {
             guard let img = putImage else { return }
             vulpina_ximage_clear_data(img)
             _ = vulpina_XDestroyImage(img)
             if let buf = putBuffer { free(buf) }
+            putImage = nil
+            putBuffer = nil
         }
     }
 

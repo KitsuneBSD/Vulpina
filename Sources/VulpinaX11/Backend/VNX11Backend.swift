@@ -1,6 +1,35 @@
 import ClibX11
 import ClibXext
 import Vulpina
+import Foundation
+
+#if os(Linux)
+import Glibc
+#else
+import Darwin
+#endif
+
+@MainActor
+private final class VNX11RunLoopDriver: VNRunLoopDriver {
+    private let fileDescriptor: Int32
+
+    init(display: OpaquePointer) {
+        self.fileDescriptor = XConnectionNumber(display)
+    }
+
+    func wait(timeout: TimeInterval?) {
+        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
+        let milliseconds: Int32
+        if let timeout {
+            milliseconds = Int32(min(Double(Int32.max), max(0, timeout * 1000).rounded()))
+        } else {
+            milliseconds = -1
+        }
+        _ = poll(&descriptor, 1, milliseconds)
+    }
+
+    func wake() {}
+}
 
 /// X11 backend for Vulpina.
 ///
@@ -25,8 +54,9 @@ public final class VNX11Backend: VNBackend {
     let screen: Int32
     private weak var runLoop: VNRunLoop?
     private var wmDeleteWindow: Atom = 0
-    /// Retained so event dispatch can forward resize / expose to it.
-    private(set) var surface: VNX11Surface?
+    /// Retained so event dispatch can forward resize / expose to each window.
+    private var surfaces: [Window: VNX11Surface] = [:]
+    private var currentSurface: VNX11Surface?
 
     // MARK: - Init / deinit
 
@@ -59,10 +89,11 @@ public final class VNX11Backend: VNBackend {
     }
 
     public func registerEventSource(with runLoop: VNRunLoop) {
-        // v1 resolution of P1: polling via the beforeWaiting observer installed
-        // in VNApplication.run(). An fd-based source (select/poll on
-        // XConnectionNumber) is deferred until a backend needs sub-60Hz latency.
         self.runLoop = runLoop
+    }
+
+    public func makeRunLoopDriver() -> any VNRunLoopDriver {
+        VNX11RunLoopDriver(display: display)
     }
 
     public func pollEvents() {
@@ -105,8 +136,8 @@ public final class VNX11Backend: VNBackend {
         let s = VNX11Surface(
             display: display, window: win,
             visual: visual, screen: screen, depth: depth,
-            hasSHM: hasSHM)
-        surface = s
+            hasSHM: hasSHM, backingScale: backingScaleFactor)
+        surfaces[win] = s
         return s
     }
 
@@ -119,17 +150,19 @@ public final class VNX11Backend: VNBackend {
     // MARK: - Event dispatch
 
     private func handleEvent(_ event: inout XEvent) {
+        currentSurface = surfaces[event.xany.window]
+        guard currentSurface != nil else { return }
         switch Int32(event.type) {
         case Expose:
             if event.xexpose.count == 0 {
-                surface?.didExpose()
+                currentSurface?.didExpose()
             }
 
         case ConfigureNotify:
             let w = Int(event.xconfigure.width)
             let h = Int(event.xconfigure.height)
             if w > 0 && h > 0 {
-                surface?.didResize(width: w, height: h)
+                currentSurface?.didResize(width: w, height: h)
             }
 
         case ButtonPress:
@@ -204,7 +237,7 @@ public final class VNX11Backend: VNBackend {
     /// Converts X11 pixel coords (top-left, y-down) → window points (bottom-left, y-up).
     private func windowPoint(x: Int, y: Int) -> VNPoint {
         let scale = backingScaleFactor
-        let heightPts = Double(surface?.heightPixels ?? 0) / scale
+        let heightPts = Double(currentSurface?.heightPixels ?? 0) / scale
         return VNPoint(x: Double(x) / scale,
                        y: heightPts - Double(y) / scale)
     }
@@ -230,7 +263,8 @@ public final class VNX11Backend: VNBackend {
         let len = XLookupString(&event.xkey, &buf, Int32(buf.count), &keySym, nil)
         let chars: String
         if len > 0 {
-            chars = String(cString: buf)
+            chars = String(decoding: buf.prefix(Int(len)).map { UInt8(bitPattern: $0) },
+                           as: UTF8.self)
         } else {
             chars = ""
         }
@@ -238,6 +272,6 @@ public final class VNX11Backend: VNBackend {
     }
 
     private func deliver(_ event: VNEvent) {
-        surface?.onEvent?(event)
+        currentSurface?.onEvent?(event)
     }
 }

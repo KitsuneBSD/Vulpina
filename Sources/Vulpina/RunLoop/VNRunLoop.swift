@@ -34,8 +34,17 @@ public final class VNRunLoop {
     private var timers:    [VNRunLoopTimer]     = []
     private var observers: [VNRunLoopObserver]  = []
     private var _isStopped = false
+    private var _isRunning = false
+    private var driver: any VNRunLoopDriver = VNSleepRunLoopDriver()
 
     private init() {}
+
+    /// Installs the driver used while the loop is running.
+    ///
+    /// - Parameter driver: Platform or test-specific wait implementation.
+    public func setDriver(_ driver: any VNRunLoopDriver) {
+        self.driver = driver
+    }
 
     // MARK: - Sources
 
@@ -82,13 +91,15 @@ public final class VNRunLoop {
     /// 2. Fires any pending ``VNRunLoopSource``s.
     /// 3. Fires any due ``VNRunLoopTimer``s.
     /// 4. Notifies `.beforeWaiting` observers.
-    /// 5. Sleeps until the next timer deadline (or 1/60 s if no timers).
+    /// 5. Waits through the configured driver until an event or timer deadline.
     /// 6. Notifies `.afterWaiting` observers.
     public func run() {
         _isStopped = false
+        _isRunning = true
         while !_isStopped {
             runOnce()
         }
+        _isRunning = false
         notify(.exit)
     }
 
@@ -124,9 +135,10 @@ public final class VNRunLoop {
 
         notify(.beforeWaiting)
 
-        // Sleep until next timer fires (max 1/60 s for responsiveness).
-        let sleepInterval = nextTimerInterval(after: Date())
-        Thread.sleep(forTimeInterval: sleepInterval)
+        // During an actual run, the driver blocks until an event or timer.
+        // Direct runOnce() calls remain non-blocking for deterministic tests.
+        let timeout = (_isRunning && !_isStopped) ? nextTimerInterval(after: Date()) : 0
+        driver.wait(timeout: timeout)
 
         notify(.afterWaiting)
 
@@ -139,14 +151,12 @@ public final class VNRunLoop {
         for observer in observers { observer.notify(activity) }
     }
 
-    private func nextTimerInterval(after now: Date) -> TimeInterval {
-        let max: TimeInterval = 1.0 / 60.0
+    private func nextTimerInterval(after now: Date) -> TimeInterval? {
         let next = timers
             .filter { $0.isValid }
             .map { $0.nextFireDate.timeIntervalSince(now) }
             .filter { $0 > 0 }
             .min()
-        guard let next else { return max }
-        return Swift.min(max, next)
+        return next
     }
 }

@@ -18,6 +18,7 @@ private let trackerHeight = 120.0
 @MainActor
 final class DemoDelegate: VNApplicationDelegate {
     let app: VNApplication
+    private var window: VNWindow?
 
     init(app: VNApplication) { self.app = app }
 
@@ -34,10 +35,14 @@ final class DemoDelegate: VNApplicationDelegate {
                                sizePoints: VNSize(width: windowWidth, height: windowHeight),
                                backingScale: scale)
         buildUI(in: window)
+        self.window = window
         window.makeKeyAndOrderFront(runLoop: application.runLoop)
     }
 
-    func applicationWillTerminate(_ application: VNApplication) {}
+    func applicationWillTerminate(_ application: VNApplication) {
+        window?.close(runLoop: application.runLoop)
+        window = nil
+    }
 
     // MARK: - View hierarchy
 

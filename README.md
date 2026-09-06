@@ -28,16 +28,16 @@ API for building desktop applications.
 | M2 — Geometry | ✅ | `VNPoint/Size/Rect/Insets/Color` |
 | M3a — Rasterizer (straight edges) | ✅ | Analytic AA, Porter-Duff, `VNGraphicsContext` |
 | M3b — Rasterizer (curves) | ✅ | Bézier flatten, stroke, ellipse, even-odd fill |
-| M4 — Core backbone | ✅ | `VNRunLoop`, `VNApplication`, `VNBackend`/`VNSurface` |
-| M5 — X11 backend | ⚠️ | Next: window + MIT-SHM blit |
-| M6 — VNView | ⚠️ | Frame-based layout, draw cycle |
-| M7 — Input | ⚠️ | Events, hit-test, responder chain |
+| M4 — Core backbone | ✅ | `VNRunLoop`, `VNApplication`, backend-injected event driver |
+| M5 — X11 backend | ✅ | Window, expose/resize, MIT-SHM blit, multi-window routing |
+| M6 — VNView | ✅ | Frame-based layout, draw cycle, resize propagation |
+| M7 — Input | ✅ | Events, hit-test, responder chain |
 | M8 — Text | ⚠️ | Own TTF/OTF parser + TextKit-like layout |
 | M9 — Wayland backend | ⚠️ | `wl_shm` blit |
 | M10 — Controls / layout | ⚠️ | `VNButton`, autoresizing |
 | M11 — Gradients / shadows | ⚠️ | Linear/radial gradients, drop shadows |
 
-**137 tests passing** across geometry, rasterizer (including mathematical invariance),
+**243 tests passing** across geometry, rasterizer (including mathematical invariance),
 run loop, and application lifecycle.
 
 ## Prerequisites

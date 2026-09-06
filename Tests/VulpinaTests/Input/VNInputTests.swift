@@ -5,6 +5,7 @@ import Testing
 
 private final class MockSurface: VNSurface {
     var onNeedsRedraw: (@MainActor () -> Void)? = nil
+    var onResize: (@MainActor (VNSize) -> Void)? = nil
     var onEvent: (@MainActor (VNEvent) -> Void)? = nil
     @MainActor func present(_ fb: VNFramebuffer) {}
 }

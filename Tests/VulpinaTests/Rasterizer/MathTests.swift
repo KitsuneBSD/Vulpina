@@ -288,7 +288,7 @@ struct WindingRuleTests {
 struct PorterDuffIdentityTests {
     // source-over: A over transparent = A (identity for transparent dst).
     @Test func sourceOverTransparentDst() {
-        let (r, g, b, a) = VNPorterDuffBlitter.blend(
+        let (r, _, _, a) = VNPorterDuffBlitter.blend(
             srcR: 0.8, srcG: 0.3, srcB: 0.1, srcA: 0.7,
             dstR: 0,   dstG: 0,   dstB: 0,   dstA: 0,
             coverage: 1, mode: .sourceOver)
@@ -299,7 +299,7 @@ struct PorterDuffIdentityTests {
 
     // source-over: opaque src completely covers any dst.
     @Test func sourceOverOpaqueSrcCoversAll() {
-        let (r, g, b, a) = VNPorterDuffBlitter.blend(
+        let (r, _, b, a) = VNPorterDuffBlitter.blend(
             srcR: 1, srcG: 0, srcB: 0, srcA: 1,
             dstR: 0, dstG: 0, dstB: 1, dstA: 1,
             coverage: 1, mode: .sourceOver)

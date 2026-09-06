@@ -20,7 +20,7 @@ public final class VNWindow {
     public let contentView: VNView
 
     /// Size of the window in points.
-    public let sizePoints: VNSize
+    public private(set) var sizePoints: VNSize
 
     /// Points-to-pixels scale factor (e.g. 2.0 on HiDPI displays).
     public let backingScale: Double
@@ -78,12 +78,42 @@ public final class VNWindow {
         surface.onNeedsRedraw = { [weak self] in
             self?.contentView.setNeedsDisplay()
         }
+        surface.onResize = { [weak self] size in
+            self?.resize(to: size)
+        }
 
         // Route backend input events through the responder chain.
         surface.onEvent = { [weak self] event in
             self?.sendEvent(event)
         }
 
+        contentView.setNeedsDisplay()
+    }
+
+    /// Stops observing `runLoop` and detaches surface callbacks.
+    ///
+    /// Call this before releasing a window that has been made visible.
+    public func close(runLoop: VNRunLoop = .main) {
+        if let observer = _displayObserver {
+            runLoop.removeObserver(observer)
+            _displayObserver = nil
+        }
+        surface.onNeedsRedraw = nil
+        surface.onResize = nil
+        surface.onEvent = nil
+    }
+
+    /// Updates the window geometry after a backend resize.
+    ///
+    /// - Parameter sizePoints: New size in logical points.
+    public func resize(to sizePoints: VNSize) {
+        guard sizePoints != self.sizePoints else { return }
+        self.sizePoints = sizePoints
+        contentView.frame = VNRect(origin: .zero, size: sizePoints)
+        _context = VNGraphicsContext(
+            widthPixels: Int((sizePoints.width * backingScale).rounded()),
+            heightPixels: Int((sizePoints.height * backingScale).rounded()),
+            backingScale: backingScale)
         contentView.setNeedsDisplay()
     }
 

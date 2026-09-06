@@ -11,12 +11,12 @@
 
 | Area | Status | Key Gaps |
 |------|--------|----------|
-| **Infra (SwiftPM/Make)** | ✅ Working | `make build`/`release`/`clean`/`test` ✅; Swift 6.3 strict concurrency; **241 testes / 41 suites** ✅ |
+| **Infra (SwiftPM/Make)** | ✅ Working | `make build`/`release`/`clean`/`test` ✅; Swift 6.3 strict concurrency; **243 testes / 41 suites** ✅ |
 | **Ambiente** | ✅ M1 (2026-08-09) | `VNEnvironment` X11-first + `VULPINA_BACKEND` override; 31 testes ✅ |
 | **Geometria** | ✅ M2 (2026-08-11) | `VNPoint`/`VNSize`/`VNRect`/`VNInsets`/`VNColor` — structs `Sendable`, 30 testes ✅ | **Math/GeometryForms (D33) pendente** — `VNShape` + área exata (Green) + `length(at t:)`; `VNPath` migra de `Rasterizer/` |
 | **Rasterizador** | ✅ M3a+M3b+M3c (2026-08-12) | flatten adaptativo 0.1px, ellipse, roundedRect, stroke cap/join, Porter-Duff, even-odd | **Próprio em Swift**, vetorial universal, **AA analítico direto** (D17), scan→cobertura→blitter (D18; **spans por coluna pendente**); Porter-Duff **matriz W3C ✅ 12/12 operadores** (IMM-5 corrigido); **M3c = grupos isolados ✅** + composição glass adiada p/ M12 |
-| **Core backbone** | ✅ M4 (2026-08-11) | `VNRunLoop`/`VNApplication`/`VNBackend` + delegate lifecycle + polling backend; IMM-1 corrigido |
-| **Backend X11** | ✅ M5 (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext`; janela, expose, MIT-SHM blit, polling 60Hz, `backingScaleFactor` via Xft.dpi, WM_DELETE_WINDOW |
+| **Core backbone** | ✅ M4/M4b | `VNRunLoopDriver` injetável; driver de espera portátil; sem polling fixo no core |
+| **Backend X11** | ✅ M5 (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext`; janela, expose, resize, MIT-SHM blit, `backingScaleFactor` via Xft.dpi, WM_DELETE_WINDOW; conexão X11 aguardada via `poll()` |
 | **Views** | ✅ M6 (2026-08-12) | `VNView` frame/bounds, `isFlipped=false`, `draw(_:)`, display cycle, clip, y-flip |
 | **Input** | ✅ M7 (2026-08-12) | `VNEvent`/`VNResponder`/hitTest/responder chain/`firstResponder`/`sendEvent`; flip de coordenadas; X11 mouse+teclado+scroll |
 | **Texto** | ⚠️ M8 pendente | **Próprio em Swift** (D25), modelo TextKit-like "escrever em folha" (D26); glyphs pelo nosso scan converter; `VNLabel` |
@@ -66,6 +66,7 @@
 
 | D35 | Interop Vulkan — Swift ↔ ObjC | **Swift NÃO importa ObjC fora da Apple** (interop desabilitado no compilador; thread de viabilidade GNUstep mar–abr 2026 sem implementação; SE-0403 mixed-language targets "Returned for Revision"). **Rota ObjC descartada** ("dar de João sem braço" quebra na fronteira do Swift). Estrutura: `ClibVulkan` (`systemLibrary` D7) + `VulpinaVulkan` (target Clang, C++/C internos, **API `extern "C"` com handles opacos**) + Swift importa a C API (mesmo padrão do `ClibX11`); o "linkar direto ao Vulkan" acontece dentro do target Clang | core continua puro Swift (D3); a fronteira C torna a língua interna substituível (C++/Rust/ObjC++ sem o Swift perceber) |
 | D36 | Língua do wrapper Vulkan | **C++ como default** — `vulkan.hpp` com `vk::raii::` (destruição automática, elimina a classe de leaks em paths de erro), volk (loader), STL; arquitetura padrão da indústria (Skia, wgpu = API C + internals C++); ~30–50% menos código que C. **C puro só se o FoxynOS não tiver runtime C++** (libstdc++/libc++) — C é a língua que sempre está lá; contras: sem RAII, `VkResult` manual, swapchain recreation vira campo minado de memória | runtime C++ vira dependência do target backend (trivial em Linux/*BSD); decisão pendente do toolchain do FoxynOS (P9) |
+| D37 | Runtime orientado a eventos por kernel | **`VNRunLoop` de alto nível sobre drivers injetáveis**: Linux usa `epoll` (`eventfd` para wake, `timerfd` para timers; integra FDs de X11/Wayland, `inotify` e sockets); BSD usa `kqueue` (`EVFILT_READ/WRITE/TIMER/VNODE/SIGNAL/PROC/USER`); `poll` é o fallback portátil e `select` apenas o último recurso | elimina polling fixo de 60Hz e acordadas ociosas; reduz latência; primitivas do kernel ficam fora da API pública e dos imports do core; testes usam driver determinístico |
 
 > Convensões consolidadas: prefixo `VN`, núcleo backend-agnóstico, value semantics (structs) para geometria/estado, classes só onde identidade importa, Swift 6.3 strict concurrency, UI isolada em `@MainActor`.
 
@@ -75,7 +76,7 @@
 
 | # | Decisão | Contexto |
 |---|---------|----------|
-| P1 | **D5 — source por fd** | ✅ **Decidida (2026-08-11)**: aceitar polling 60Hz via observer `beforeWaiting` como v1. fd-source (`select`/`poll` em `XConnectionNumber`) entra se latência de input > 16ms for observada em benchmark real. |
+| P1 | **D5 — source por fd** | ✅ **Implementada parcialmente (2026-08-22)**: `VNRunLoopDriver` é injetável; X11 usa `poll(XConnectionNumber)` e bloqueia até evento ou deadline real. `epoll`/`kqueue` e wake explícito permanecem como evolução multiplataforma. |
 | P2 | **D27 × `VNSurface`** | ✅ **Decidida (2026-08-11)**: aceitar cópia única `VNFramebuffer` → SHM buffer no `present(_:)`. MIT-SHM é interno ao `VNX11Surface` (zero cópia no caminho X11); a cópia do seam (Swift struct by-value) é a única overhead real. Revisar se profiling M5 mostrar bottleneck. |
 | P3 | **Renderer GPU — rota revisada (2026-08-12): CPU analítico + GPU Vulkan (tesselação → compute-coverage)** | **Antiga direção (2026-08-11)**: "uma matemática, dois substratos" — GPU via cobertura (Vello), tesselação fora (quebraria W3C 12/12 e πr²). **Revisada após análise**: GPU = **fase 1 tesselação+MSAA** (estrada batida, shippable) + **fase 2 compute-coverage estilo Vello** (endgame) na **mesma API Vulkan** — Vello ainda alpha em 2026 (README: "alpha state", blur/filters em andamento), então a cobertura não é produção nem na referência; e **a expressividade do Vulkan (compute, atomics, subgroups) só se paga no endgame** — argumento pró-cobertura, não contra. **Seam no layer/framebuffer**: GPU renderiza layers em RGBA8 premultiplied (D24), **compositor Porter-Duff compartilhado compõe** → matriz W3C sobrevive *entre* layers (blending mora no compositor, não no rasterizer); dentro do layer o MSAA assume (cobertura binária por sample — conflation documentado: NV_path_rendering mostra Cairo/Qt/Skia/Direct2D com "dark cracks"). **Invariantes**: πr² e W3C com coverage=alpha **morrem no caminho GPU** → golden images por renderer, CPU continua o reference. **Environment**: capability probing real — `VkPhysicalDeviceType.CPU` (Lavapipe) → analítico; sample counts queryados via `framebufferColorSampleCounts`; fallback obrigatório (GPU pode falhar em runtime) → **ambos os renderers existem sempre**, o env escolhe o default. **Confirmação industrial**: Skia Graphite (Chrome future, 2025) = MSAA onde pode + fallback CPU atlas. **Texto (D25)**: glyphs analíticos → textura no caminho GPU (CPU rasteriza, upload) — analítico continua vivo no GPU. **Timing**: milestone próprio **pós-M6/M7**. Em aberto: apresentação (swapchain `VK_KHR_xcb_surface` vs SHM — X11 ganha segundo caminho de present; readback serializa GPU→CPU) e estado do toolchain do FoxynOS (P9). |
 | P4 | **D13/D14 — snapshot recording (modelo `GtkSnapshot` do GTK4)** | A API `draw(_ context:)` fica idêntica, mas o alvo do desenho muda: `VNGraphicsContext` grava numa **render tree por view** (recorder), reexecutada no display pass — em vez de escrever direto no framebuffer. Habilita cache por subárvore (RepaintBoundary-style do Flutter). Refinamento, não reversão; muda a implementação do contexto (D13) e o display pass (D14). **Decidir antes do M6** (janela apertada). |
@@ -89,7 +90,7 @@
 
 ## 🔴 IMMEDIATE — Correção de Bugs
 
-> **Estado atual: `make test` completa** — **182 testes / 31 suites ✅** (2026-08-11), incluindo a matriz W3C de blend modes (`W3CBlendMatrixTests`: 12/12 operadores × fórmula W3C §6/§9.1 com αs ≠ αb + coverage como alpha + degenerados). IMM-4 reclassificado como falso positivo — verificado contra W3C Compositing-1 §9.1.11 e histórico do git (blitter intocado desde M3a/M3b).
+> **Estado atual: `make test` completa** — **243 testes / 41 suites ✅** (2026-08-22), incluindo a matriz W3C de blend modes (`W3CBlendMatrixTests`: 12/12 operadores × fórmula W3C §6/§9.1 com αs ≠ αb + coverage como alpha + degenerados). IMM-4 reclassificado como falso positivo — verificado contra W3C Compositing-1 §9.1.11 e histórico do git (blitter intocado desde M3a/M3b).
 
 | # | Bug | Estado |
 |---|-----|--------|
@@ -99,6 +100,7 @@
 | IMM-4 | **`VNPorterDuffBlitter` `.destinationAtop` — FALSO POSITIVO da auditoria de 2026-08-11**: código verificado correto per W3C Compositing-1 §9.1.11 (`Fa = 1−αb; Fb = αs` → `co = αs·Cs·(1−αb) + αb·Cb·αs`); git confirma blitter intocado desde M3a/M3b. Lacuna real: só 7/12 operadores tinham teste e nenhum com fórmula completa (αs ≠ αb) — fechada pela matriz W3C em `W3CBlendMatrixTests` (12/12 operadores + coverage + degenerados) | ✅ verificado |
 | IMM-5 | **Joins do stroker aproximados** (`VNStroker.joinPoint`) — miter-limit excedido cai para ponto na bissetriz a distância `half` (não bevel; sub-preenche); round join emite vértice único na bissetriz (corda inscrita, canto "chato"); bevel emite A→bissetriz→B (sobre-preenche). Contradiz D17 "cobertura exata". Faltam testes de geometria de join | ✅ corrigido (2026-08-12) — `emitJoin` detecta lado convexo/côncavo via cross product; `emitConvexSide` emite miter/bevel/round corretos; `lineIntersect` para o lado côncavo; 6 testes `StrokerJoinTests` |
 | IMM-6 | **Race MIT-SHM single-buffer (X11)** — `XShmPutImage` sem completion event + sem `XSync`; o app pode reescrever o segmento enquanto o servidor lê. `freeSHMBuffer()`/`didResize`/`deinit` fazem detach sem sync. Hardening: completion event ou ring de buffers | ✅ corrigido (2026-08-12) — `XSync(display, 0)` após `XShmPutImage` garante que o servidor terminou de ler antes do próximo frame |
+| IMM-7 | **`VulpinaDemo` abre uma janela vazia e não responde** — ownership da janela, callbacks e fechamento explícito corrigidos no delegate; `VNWindow.close()` remove o observer e desliga callbacks | ✅ corrigido (2026-08-22) |
 
 ---
 
@@ -111,10 +113,34 @@
 | M3a | Rasterizador — seam + analítico (arestas retas) | ✅ (2026-08-11) | `VNFramebuffer` (RGBA8, stride, **premultiplied** D24, pixels = points × scale); `VNAnalyticScanConverter` (sweep line, y críticos, AET, trapézios, cobertura exata D17) → buffer denso de cobertura → `VNPorterDuffBlitter` (**spans por coluna pendentes**, D18); `VNPath` (move/line/close, `windingRule` D22), `VNAffineTransform`, `VNColor`, `VNBlendMode` (Porter-Duff D23); `VNGraphicsContext` (save/restore, translate/scale/rotate, fill/stroke, blend; **clip pendente** D13); `VNRasterizer`; testes por pixel |
 | M3b | Rasterizador — curvas + primitivas completas | ✅ (2026-08-11) | `VNPath` ganha `addCurve`/`addQuadCurve`/`addArc` com **flatten adaptativo 0.1px** (padrão gg/Go + Skia); rounded rect, ellipse/círculo (D21), stroke com cap/join; cobertura×alpha (D19); testes: área de círculo ≈ πr², erro de flatten < 0.1px, roundRect, stroke |
 | M3c | Compositing conforme W3C (matriz + grupos isolados + base glass) | ✅ (2026-08-12) | **Matriz Porter-Duff ✅** — `W3CBlendMatrixTests`: 12 operadores × caso não-trivial αs=0.6 ≠ αb=0.4; **grupos isolados §9.2 ✅** — `beginTransparencyLayer(blendMode:)` + `endTransparencyLayer()` em `VNGraphicsContext`; `blendPremul` em `VNPorterDuffBlitter` para composição premul×premul; 7 testes `TransparencyLayerTests` (empty group, sourceOver, sourceIn/destinationIn em grupo vazio, blend modes de grupo, grupos aninhados, pixel W3C); **composição glass** adiada para M12 (precisa de blur Gaussiano do M11) |
-| M4 | Core backbone | ✅ (2026-08-11) | `VNRunLoop` (modes, sources, timers, observers) + `VNApplication(backend:)` + `VNApplicationDelegate` (D11) + protocolo `VNBackend`/`VNSurface(present:)`; IMM-1 corrigido; polling via `beforeWaiting` (P1 v1); 182 testes ✅ |
-| M5 | Backend X11 | ✅ (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext` (`systemLibrary(pkgConfig:)`); `VNX11Backend` + `VNX11Surface`; janela, expose, blit via MIT-SHM (XPutImage fallback, D27); polling 60Hz (P1); `backingScaleFactor` via Xft.dpi (D9); WM_DELETE_WINDOW (D12); P2 v1: aceitar cópia única, MIT-SHM interno ao backend |
+| M4 | Core backbone | ✅ (2026-08-11) | `VNRunLoop` (modes, sources, timers, observers) + `VNApplication(backend:)` + `VNApplicationDelegate` (D11) + protocolo `VNBackend`/`VNSurface(present:)`; IMM-1 corrigido; driver injetável; 242 testes ✅ |
+| M4b | Run loop orientado a eventos | ✅ parcial | `VNRunLoopDriver` no core; driver de espera portátil e driver X11 via `poll(XConnectionNumber)`; testes determinísticos. `epoll`/`kqueue`, wake explícito e fontes públicas de FD permanecem evolução futura |
+| M5 | Backend X11 | ✅ (2026-08-11) | `VulpinaX11` + `ClibX11` + `ClibXext` (`systemLibrary(pkgConfig:)`); `VNX11Backend` + `VNX11Surface`; janela, expose, resize, blit via MIT-SHM (XPutImage fallback, D27); `poll(XConnectionNumber)`; `backingScaleFactor` via Xft.dpi (D9); WM_DELETE_WINDOW (D12); roteamento por janela |
 | M6 | VNView | ✅ (2026-08-12) | `VNView`: `frame`/`bounds`, `isFlipped=false`, `draw(_ context:)` (D13), `setNeedsDisplay` + propagação + z-order (D14); `VNWindow`: display cycle via `beforeWaiting` observer, y-flip no compositor, clip por view em `VNGraphicsContext` ✅; 13 novos testes |
 | M7 | Input | ✅ (2026-08-12) | `VNEvent` (mouse/key/scroll, `VNModifierFlags`); `VNResponder` (chain, becomeFirstResponder); `VNView` herda `VNResponder` + `hitTest` + `convert(_:from:)`/`convert(_:to:)`; `VNWindow.sendEvent` (hit-test routing, drag tracking, firstResponder); `VNSurface.onEvent` callback; X11 tradução completa (ButtonPress/Release, MotionNotify, KeyPress/Release, scroll buttons 4–7); `MouseTrackerView` no demo (D30); 26 novos testes |
+
+---
+
+## Ordem de Evolução do Motor Gráfico
+
+> O rasterizador CPU é a implementação de referência: define a semântica e a correção visual, fornece fallback universal e gera as imagens de referência usadas para validar renderers futuros. A API pública de desenho pode permanecer immediate-mode, mas `VNGraphicsContext` deve evoluir para gravar comandos antes da introdução do segundo renderer.
+
+| Ordem | Etapa | Critério de conclusão |
+|-------|-------|-----------------------|
+| G1 | **Medir o rasterizador atual** | Benchmarks reproduzíveis de fill, stroke, curvas, clipping, transparência e frame composto; registrar tempo, throughput, pico de memória e alocações por frame |
+| G2 | **Substituir cobertura densa por spans/tiles** | Scan converter deixa de alocar cobertura `[Float]` de `W × H` por operação; blitter consome spans ou tiles sem alterar os resultados de referência |
+| G3 | **Reutilizar buffers e limitar redraw** | Reuso de framebuffer/cobertura, dirty regions e invalidação parcial; nenhum `clear()` ou redraw integral quando a região suja permitir trabalho menor |
+| G4 | **Introduzir display list / render tree** | `VNGraphicsContext` grava comandos de desenho; árvore/lista pode ser inspecionada, reproduzida e armazenada em cache; rasterizador CPU passa a executá-la sem mudar a API de `VNView.draw(_:)` |
+| G5 | **Completar primitivas de conteúdo** | Imagens/texturas, gradientes lineares/radiais e sombras/filtros integrados ao mesmo modelo de clip, transform e composição |
+| G6 | **Adicionar texto sobre a pipeline gráfica** | Parser e layout básicos próprios; glyphs renderizados pelo scan converter CPU e armazenáveis em cache/atlas; seam opcional para shaping complexo sem contaminar o core |
+| G7 | **Adicionar o segundo renderer (Vulkan)** | Semântica gráfica e display list estabilizadas; renderer Vulkan executa o mesmo modelo, possui golden images próprias onde MSAA divergir do CPU e mantém fallback CPU obrigatório |
+
+### Restrições da ordem
+
+- Não iniciar Vulkan antes de estabilizar display list, clipping, imagens, gradientes e composição.
+- Otimizações não podem alterar silenciosamente a cobertura, o RGBA premultiplicado nem a matriz Porter-Duff definida pelo renderer CPU.
+- A fronteira de apresentação (`VNSurface`) continua separada da execução gráfica; X11 e Wayland não entram no core.
+- Separar `VulpinaGraphics` em target próprio somente quando houver um segundo consumidor ou quando a fronteira atual impedir testes/reuso; até lá, manter separação arquitetural por dependências e pastas.
 
 ---
 
@@ -136,8 +162,10 @@
 |------|--------|
 | **Commit do M2–M5** | ✅ commitado (8 commits, topo `27eea01`); IMM-5/IMM-6/M3c commitados em `27eea01` |
 | **Matriz de blend modes** | ✅ fechada em `W3CBlendMatrixTests` (2026-08-11) — 12/12 operadores × fórmula W3C §6/§9.1 com αs ≠ αb, coverage e casos degenerados; reclassificou o IMM-4 como falso positivo |
-| **Demo `VulpinaDemo`** | ✅ criado (2026-08-12) — `swift run VulpinaDemo`; header bar, swatches, círculos, stroke sampler, `MouseTrackerView` interativo (crosshair + drag rectangle, D30) |
-| **README desatualizado** | ⚠️ diz "M5 next" (já feito) e "137 testes" (hoje 182); sincronizar com este TODO |
+| **Demo `VulpinaDemo`** | ✅ criado; delegate retém a janela e fecha observers/callbacks no término |
+| **Resize de `VNWindow`** | ✅ `VNSurface.onResize` atualiza `VNWindow`, `contentView` e `VNGraphicsContext`; teste de resize adicionado |
+| **Múltiplas janelas no X11** | ✅ eventos associados por `Window` X11 → `VNX11Surface` |
+| **README desatualizado** | ✅ sincronizado com M5–M7 e 243 testes |
 | `.ai-docs/` | ✅ CHANGELOG/ROADMAP/ARCHITECTURE criados (D32); AUDITS quando houver histórico |
 | Doc comments em 100% do public API (AGENTS.md) | ⚠️ obrigatório; auditar ao fechar cada marco |
 

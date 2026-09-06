@@ -6,6 +6,7 @@ import Testing
 private final class RecordingSurface: VNSurface {
     var lastFramebuffer: VNFramebuffer?
     var onNeedsRedraw: (@MainActor () -> Void)? = nil
+    var onResize: (@MainActor (VNSize) -> Void)? = nil
     var onEvent: (@MainActor (VNEvent) -> Void)? = nil
     @MainActor func present(_ framebuffer: VNFramebuffer) {
         lastFramebuffer = framebuffer
@@ -109,6 +110,21 @@ struct VNWindowDisplayTests {
         surface.lastFramebuffer = nil
         win.display()  // should be a no-op
         #expect(surface.lastFramebuffer == nil)
+    }
+
+    @Test @MainActor func resizeRecreatesContextAndContentBounds() {
+        let surface = RecordingSurface()
+        let win = VNWindow(surface: surface,
+                           sizePoints: VNSize(width: 10, height: 8),
+                           backingScale: 2)
+        win.display()
+        win.resize(to: VNSize(width: 20, height: 12))
+        win.display()
+
+        #expect(win.sizePoints == VNSize(width: 20, height: 12))
+        #expect(win.contentView.bounds == VNRect(x: 0, y: 0, width: 20, height: 12))
+        #expect(surface.lastFramebuffer?.widthPixels == 40)
+        #expect(surface.lastFramebuffer?.heightPixels == 24)
     }
 
     @Test @MainActor func contentViewFillsWindow() {
